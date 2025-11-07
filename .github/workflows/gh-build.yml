@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PREFIX: /opt/ardour-w64
-      TARGET: x86_64-w64-mingw32
+      TARGET: mingw
 
     steps:
       - name: Checkout code (with full history)
@@ -93,7 +93,6 @@ jobs:
       - name: Configure cross-build (Windows x86_64)
         run: |
           ./waf configure \
-            --cross-compile \
             --target=$TARGET \
             --prefix=$PREFIX \
             --optimize \
