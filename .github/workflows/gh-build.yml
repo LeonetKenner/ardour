@@ -93,14 +93,11 @@ jobs:
       - name: Configure cross-build (Windows x86_64)
         run: |
           ./waf configure \
-            --target=$TARGET \
+            --dist-target=$TARGET \
             --prefix=$PREFIX \
             --optimize \
             --ptformat \
-            --with-backends=jack,portaudio,dummy \
-            --windows-vst \
-            --vst3 \
-            --freedesktop=no
+            --with-backends=jack,portaudio,dummy
 
       - name: Build Ardour (Windows)
         run: ./waf -j$(nproc)
