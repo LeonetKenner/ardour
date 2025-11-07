@@ -38,7 +38,7 @@ jobs:
             libflac-dev libtiff-dev libjpeg-dev libpng-dev \
             libuuid1 uuid-dev zlib1g-dev libx11-dev \
             libnss3-dev libnspr4-dev \
-            xsltproc libxml2-utils python3-docutils
+            xsltproc libxml2-utils python3-docutils doxygen
 
       - name: Configure build
         run: |
