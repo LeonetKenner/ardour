@@ -2,13 +2,9 @@ name: Build Ardour (Linux x86_64)
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [ main, master ]
   pull_request:
-    branches:
-      - main
-      - master
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -18,24 +14,31 @@ jobs:
       PREFIX: /usr/local
 
     steps:
-      - name: Checkout code
+      - name: Checkout code (with full history)
         uses: actions/checkout@v5
-        with: 
-          fetch-depth: 0
+        with:
+          fetch-depth: 0  # Ardour needs git metadata
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential git python3 pkg-config \
-            libboost-all-dev libasound2-dev libjack-jackd2-dev \
+            build-essential autoconf automake cmake m4 make \
+            git python3 pkg-config gettext intltool itstool yelp-tools \
+            bison flex libtool libffi-dev libexpat1-dev libreadline-dev \
+            libboost-all-dev libasound2-dev libjack-jackd2-dev libpulse-dev \
             libglib2.0-dev libglibmm-2.4-dev libgtk-3-dev libgtkmm-3.0-dev \
             libsndfile1-dev libarchive-dev liblo-dev libtag1-dev \
             vamp-plugin-sdk librubberband-dev libfftw3-dev libaubio-dev \
             libxml2-dev libsamplerate0-dev lv2-dev libserd-dev libsord-dev \
             libsratom-dev liblilv-dev libwebsockets-dev libusb-1.0-0-dev \
             libpangomm-1.4-dev libcurl4-openssl-dev libcppunit-dev \
-            libpulse-dev libdbus-1-dev
+            libpango1.0-dev libcairomm-1.0-dev libfontconfig1-dev \
+            libfreetype6-dev libfribidi-dev libvorbis-dev libogg-dev \
+            libflac-dev libtiff-dev libjpeg-dev libpng-dev \
+            libuuid1 uuid-dev zlib1g-dev libx11-dev \
+            libnss3-dev libnspr4-dev \
+            xsltproc libxml2-utils python3-docutils
 
       - name: Configure build
         run: |
