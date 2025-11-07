@@ -1,4 +1,4 @@
-name: Build Ardour (Linux x86_64)
+name: Build Ardour (Linux + Windows x86_64)
 
 on:
   push:
@@ -17,9 +17,9 @@ jobs:
       - name: Checkout code (with full history)
         uses: actions/checkout@v5
         with:
-          fetch-depth: 0  # Ardour needs git metadata
+          fetch-depth: 0
 
-      - name: Install dependencies
+      - name: Install dependencies (Linux)
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -40,7 +40,7 @@ jobs:
             libnss3-dev libnspr4-dev \
             xsltproc libxml2-utils python3-docutils doxygen graphviz
 
-      - name: Configure build
+      - name: Configure build (Linux)
         run: |
           ./waf configure \
             --optimize \
@@ -49,16 +49,68 @@ jobs:
             --with-backends=jack,alsa,pulseaudio \
             --freedesktop
 
-      - name: Build Ardour
-        run: |
-          ./waf -j$(nproc)
+      - name: Build Ardour (Linux)
+        run: ./waf -j$(nproc)
 
-      - name: Install to staging
-        run: |
-          ./waf install --destdir=$GITHUB_WORKSPACE/_install
+      - name: Install to staging (Linux)
+        run: ./waf install --destdir=$GITHUB_WORKSPACE/_install_linux
 
-      - name: Upload build artifacts
+      - name: Upload build artifacts (Linux)
         uses: actions/upload-artifact@v4
         with:
           name: ardour-linux-x86_64
-          path: _install
+          path: _install_linux
+
+  build-windows:
+    runs-on: ubuntu-latest
+    env:
+      PREFIX: /opt/ardour-w64
+      TARGET: x86_64-w64-mingw32
+
+    steps:
+      - name: Checkout code (with full history)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install cross-compilation dependencies (Windows)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential autoconf automake cmake m4 make \
+            git python3 pkg-config bison flex libtool \
+            mingw-w64 g++-mingw-w64-x86-64 \
+            gettext intltool libffi-dev libexpat1-dev libreadline-dev \
+            libboost-all-dev libsndfile1-dev libarchive-dev liblo-dev \
+            libtag1-dev librubberband-dev libfftw3-dev libxml2-dev \
+            libsamplerate0-dev lv2-dev libserd-dev libsord-dev \
+            libsratom-dev liblilv-dev libwebsockets-dev \
+            libpng-dev libcairo2-dev libpango1.0-dev libfontconfig1-dev \
+            libfreetype6-dev libfribidi-dev libvorbis-dev libogg-dev \
+            libflac-dev libusb-1.0-0-dev python3-docutils doxygen graphviz \
+            wine64
+
+      - name: Configure cross-build (Windows x86_64)
+        run: |
+          ./waf configure \
+            --cross-compile \
+            --target=$TARGET \
+            --prefix=$PREFIX \
+            --optimize \
+            --ptformat \
+            --with-backends=jack,portaudio,dummy \
+            --windows-vst \
+            --vst3 \
+            --freedesktop=no
+
+      - name: Build Ardour (Windows)
+        run: ./waf -j$(nproc)
+
+      - name: Install to staging (Windows)
+        run: ./waf install --destdir=$GITHUB_WORKSPACE/_install_win64
+
+      - name: Upload build artifacts (Windows)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ardour-win64
+          path: _install_win64
