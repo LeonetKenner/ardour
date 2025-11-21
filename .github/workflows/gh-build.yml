@@ -1,108 +1,128 @@
-name: Build Ardour (Linux + Windows x86_64)
+name: Build Ardour (Linux x86_64)
+
+
 
 on:
+
   push:
+
     branches: [ main, master ]
+
   pull_request:
+
     branches: [ main, master ]
+
   workflow_dispatch:
 
+
+
 jobs:
-  build:
-    name: Build Ardour (${{ matrix.os-name }})
+
+  build-linux:
+
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        include:
-          - os-name: Linux x86_64
-            id: linux
-            prefix: /usr/local
-            target: native
-          - os-name: Windows x86_64
-            id: win64
-            prefix: /opt/ardour-w64
-            target: mingw
-
     env:
-      PREFIX: ${{ matrix.prefix }}
-      TARGET: ${{ matrix.target }}
+
+      PREFIX: /usr/local
+
+
 
     steps:
+
       - name: Checkout code (with full history)
+
         uses: actions/checkout@v5
+
         with:
-          fetch-depth: 0
+
+          fetch-depth: 0  # Ardour needs git metadata
+
+
 
       - name: Install dependencies
+
         run: |
+
           sudo apt-get update
-          if [ "${{ matrix.id }}" = "linux" ]; then
-            sudo apt-get install -y \
-              build-essential autoconf automake cmake m4 make \
-              git python3 pkg-config gettext intltool itstool yelp-tools \
-              bison flex libtool libffi-dev libexpat1-dev libreadline-dev \
-              libboost-all-dev libasound2-dev libjack-jackd2-dev libpulse-dev \
-              libglib2.0-dev libglibmm-2.4-dev libgtk-3-dev libgtkmm-3.0-dev \
-              libsndfile1-dev libarchive-dev liblo-dev libtag1-dev \
-              vamp-plugin-sdk librubberband-dev libfftw3-dev libaubio-dev \
-              libxml2-dev libsamplerate0-dev lv2-dev libserd-dev libsord-dev \
-              libsratom-dev liblilv-dev libwebsockets-dev libusb-1.0-0-dev \
-              libpangomm-1.4-dev libcurl4-openssl-dev libcppunit-dev \
-              libpango1.0-dev libcairomm-1.0-dev libfontconfig1-dev \
-              libfreetype6-dev libfribidi-dev libvorbis-dev libogg-dev \
-              libflac-dev libtiff-dev libjpeg-dev libpng-dev \
-              libuuid1 uuid-dev zlib1g-dev libx11-dev \
-              libnss3-dev libnspr4-dev \
-              xsltproc libxml2-utils python3-docutils doxygen graphviz
-          else
-            sudo apt-get install -y \
-              build-essential autoconf automake cmake m4 make \
-              git python3 pkg-config bison flex libtool \
-              mingw-w64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64 \
-              gettext intltool libffi-dev libexpat1-dev libreadline-dev \
-              libboost-all-dev libsndfile1-dev libarchive-dev liblo-dev \
-              libtag1-dev librubberband-dev libfftw3-dev libxml2-dev \
-              libsamplerate0-dev lv2-dev libserd-dev libsord-dev \
-              libsratom-dev liblilv-dev libwebsockets-dev \
-              libpng-dev libcairo2-dev libpango1.0-dev libfontconfig1-dev \
-              libfreetype6-dev libfribidi-dev libvorbis-dev libogg-dev \
-              libflac-dev libusb-1.0-0-dev python3-docutils doxygen graphviz \
-              wine64 \
-              mingw-w64-x86-64-glib2-dev \
-              mingw-w64-x86-64-glibmm2.4-dev \
-              mingw-w64-x86-64-cairo-dev \
-              mingw-w64-x86-64-pango-dev \
-              mingw-w64-x86-64-pangomm-dev
-            sudo ln -sf /usr/bin/x86_64-w64-mingw32-windres /usr/local/bin/windres
-          fi
+
+          sudo apt-get install -y \
+
+            build-essential autoconf automake cmake m4 make \
+
+            git python3 pkg-config gettext intltool itstool yelp-tools \
+
+            bison flex libtool libffi-dev libexpat1-dev libreadline-dev \
+
+            libboost-all-dev libasound2-dev libjack-jackd2-dev libpulse-dev \
+
+            libglib2.0-dev libglibmm-2.4-dev libgtk-3-dev libgtkmm-3.0-dev \
+
+            libsndfile1-dev libarchive-dev liblo-dev libtag1-dev \
+
+            vamp-plugin-sdk librubberband-dev libfftw3-dev libaubio-dev \
+
+            libxml2-dev libsamplerate0-dev lv2-dev libserd-dev libsord-dev \
+
+            libsratom-dev liblilv-dev libwebsockets-dev libusb-1.0-0-dev \
+
+            libpangomm-1.4-dev libcurl4-openssl-dev libcppunit-dev \
+
+            libpango1.0-dev libcairomm-1.0-dev libfontconfig1-dev \
+
+            libfreetype6-dev libfribidi-dev libvorbis-dev libogg-dev \
+
+            libflac-dev libtiff-dev libjpeg-dev libpng-dev \
+
+            libuuid1 uuid-dev zlib1g-dev libx11-dev \
+
+            libnss3-dev libnspr4-dev \
+
+
+            xsltproc libxml2-utils python3-docutils doxygen graphviz
+
+
 
       - name: Configure build
+
         run: |
-          if [ "${{ matrix.id }}" = "linux" ]; then
-            ./waf configure \
-              --optimize \
-              --ptformat \
-              --docs \
-              --with-backends=jack,alsa,pulseaudio \
-              --freedesktop
-          else
-            ./waf configure \
-              --dist-target=mingw \
-              --prefix=$PREFIX \
-              --optimize \
-              --ptformat \
-              --with-backends=jack,portaudio,dummy
-          fi
+
+          ./waf configure \
+
+            --optimize \
+
+            --ptformat \
+
+            --docs \
+
+            --with-backends=jack,alsa,pulseaudio \
+
+            --freedesktop
+
+
 
       - name: Build Ardour
-        run: ./waf -j$(nproc)
+
+        run: |
+
+          ./waf -j$(nproc)
+
+
 
       - name: Install to staging
-        run: ./waf install --destdir=$GITHUB_WORKSPACE/_install_${{ matrix.id }}
+
+        run: |
+
+          ./waf install --destdir=$GITHUB_WORKSPACE/_install
+
+
 
       - name: Upload build artifacts
+
         uses: actions/upload-artifact@v4
+
         with:
-          name: ardour-${{ matrix.id }}
-          path: _install_${{ matrix.id }}
+
+          name: ardour-linux-x86_64
+
+          path: _install
