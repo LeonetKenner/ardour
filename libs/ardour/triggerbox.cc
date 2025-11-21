@@ -1722,6 +1722,7 @@ AudioTrigger::set_region_in_worker_thread_internal (std::shared_ptr<Region> r, b
 
 	if (!r) {
 		data.reset ();
+		send_property_change (ARDOUR::Properties::region);
 		return 0;
 	}
 
@@ -2987,6 +2988,7 @@ MIDITrigger::set_region_in_worker_thread (std::shared_ptr<Region> r)
 		delete old;
 		_model.reset ();
 		set_name ("");
+		send_property_change (ARDOUR::Properties::region);
 		return 0;
 	}
 
@@ -5438,11 +5440,13 @@ TriggerBox::set_state (const XMLNode& node, int version)
 {
 	Processor::set_state (node, version);
 
+	XMLNode* tnode (node.child (X_("Triggers")));
+	if (!tnode) {
+		return -1;
+	}
+
 	node.get_property (X_("data-type"), _data_type);
 	node.get_property (X_("order"), _order);
-
-	XMLNode* tnode (node.child (X_("Triggers")));
-	assert (tnode);
 
 	XMLNodeList const & tchildren (tnode->children());
 
