@@ -91,10 +91,14 @@ jobs:
           export CC="$REAL_GCC"
           export CXX="$REAL_GXX"
           
-          # Force Linker Flags during Configure
+          # 1. SET FLAGS IN ENVIRONMENT
+          # LDFLAGS is for the linker (fixes missing libraries)
           export LDFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
-          export LINKFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
+          # CXXFLAGS fixes the warning treated as error
+          export CXXFLAGS="-Wno-maybe-uninitialized"
           
+          # 2. RUN WAF WITH --keepflags
+          # This tells Waf: "Don't ignore the variables I just exported!"
           /mingw64/bin/python ./waf configure \
             --dist-target=mingw \
             --optimize \
@@ -102,6 +106,7 @@ jobs:
             --no-dr-mingw \
             --cxx17 \
             --no-lrdf \
+            --keepflags \
             --with-backends=jack,portaudio,dummy \
             --check-c-compiler=gcc \
             --check-cxx-compiler=g++ \
@@ -112,10 +117,10 @@ jobs:
         run: |
           export CC="$REAL_GCC"
           export CXX="$REAL_GXX"
-
-          # Force Linker Flags during Build (Critical for final linking)
+          
+          # Re-export flags for the build step
           export LDFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
-          export LINKFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
+          export CXXFLAGS="-Wno-maybe-uninitialized"
           
           /mingw64/bin/python ./waf
 
