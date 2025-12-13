@@ -1,4 +1,4 @@
-name: Build Ardour (Native Windows MinGW + Ccache)
+name: Build Ardour (Native Windows MinGW)
 
 on:
   push:
@@ -13,7 +13,6 @@ jobs:
     
     env:
       MSYS2_CACHE_DIR: D:\a\_temp\msys64\var\cache\pacman\pkg
-      CCACHE_DIR: D:\a\_temp\.ccache
 
     steps:
       - name: Checkout code
@@ -28,20 +27,13 @@ jobs:
           key: msys2-packages-${{ runner.os }}-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: msys2-packages-${{ runner.os }}-
 
-      - name: Cache CCache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-${{ github.sha }}
-          restore-keys: ccache-${{ runner.os }}-
-
       - name: Setup MSYS2 & Install Deps
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
           install: >-
-            git make pkg-config diffutils ccache
+            git make pkg-config diffutils
             mingw-w64-x86_64-python
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-gcc
@@ -85,28 +77,23 @@ jobs:
             mingw-w64-x86_64-readline
             mingw-w64-x86_64-libgnurx
 
-      - name: Setup Ccache Masquerade
+      - name: Bruteforce Find GCC
         shell: msys2 {0}
         run: |
-          mkdir -p /usr/local/bin/ccache-wrappers
-          CCACHE_BIN=$(which ccache)
-          cp "$CCACHE_BIN" /usr/local/bin/ccache-wrappers/gcc.exe
-          cp "$CCACHE_BIN" /usr/local/bin/ccache-wrappers/g++.exe
-          cp "$CCACHE_BIN" /usr/local/bin/ccache-wrappers/cc.exe
-          cp "$CCACHE_BIN" /usr/local/bin/ccache-wrappers/c++.exe
+          FOUND_GCC=$(find /mingw64 -name "gcc.exe" | head -n 1)
+          FOUND_GXX=$(find /mingw64 -name "g++.exe" | head -n 1)
+          echo "REAL_GCC=$FOUND_GCC" >> $GITHUB_ENV
+          echo "REAL_GXX=$FOUND_GXX" >> $GITHUB_ENV
 
       - name: Configure
         shell: msys2 {0}
         run: |
-          # 1. Point CC/CXX to our FAKE wrappers
-          export CC=/usr/local/bin/ccache-wrappers/gcc.exe
-          export CXX=/usr/local/bin/ccache-wrappers/g++.exe
+          export CC="$REAL_GCC"
+          export CXX="$REAL_GXX"
           
-          # 2. DO NOT Export LDFLAGS here.
-          # We want 'configure' to run clean so it finds system libs like 'setupapi'.
-          
-          # 3. Path Setup
-          export PATH="/mingw64/bin:$PATH"
+          # Force Linker Flags during Configure
+          export LDFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
+          export LINKFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
           
           /mingw64/bin/python ./waf configure \
             --dist-target=mingw \
@@ -123,13 +110,10 @@ jobs:
       - name: Build
         shell: msys2 {0}
         run: |
-          # 1. Re-export Compiler
-          export CC=/usr/local/bin/ccache-wrappers/gcc.exe
-          export CXX=/usr/local/bin/ccache-wrappers/g++.exe
-          export PATH="/mingw64/bin:$PATH"
-          
-          # 2. EXPORT FLAGS HERE (Only for the Build Step)
-          # This injects the missing libraries just for the linking stage
+          export CC="$REAL_GCC"
+          export CXX="$REAL_GXX"
+
+          # Force Linker Flags during Build (Critical for final linking)
           export LDFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
           export LINKFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
           
