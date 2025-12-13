@@ -495,6 +495,8 @@ public:
 	void request_stop (bool abort = false, bool clear_state = false, TransportRequestSource origin = TRS_UI);
 	void request_locate (samplepos_t sample, bool force = false, LocateTransportDisposition ltd = RollIfAppropriate, TransportRequestSource origin = TRS_UI);
 
+	bool request_locate_to_mark (std::string const&, LocateTransportDisposition ltd = RollIfAppropriate, TransportRequestSource origin = TRS_UI);
+
 	void request_play_loop (bool yn, bool leave_rolling = false);
 	bool get_play_loop () const { return play_loop; }
 
@@ -662,7 +664,39 @@ public:
 	std::vector<std::string> possible_states() const;
 	static std::vector<std::string> possible_states (std::string path);
 
-	bool export_track_state (std::shared_ptr<RouteList> rl, const std::string& path);
+	enum RouteGroupImportMode {
+		IgnoreRouteGroup,
+		UseRouteGroup,
+		CreateRouteGroup
+	};
+
+	struct RouteImportInfo {
+		RouteImportInfo (std::string const& n, PresentationInfo const& p, int mb)
+			: name (n)
+			, pi (p)
+			, mixbus (mb)
+		{}
+
+		std::string      name;
+		PresentationInfo pi;
+		int              mixbus;
+
+		bool operator< (RouteImportInfo const& o) {
+			if (mixbus != o.mixbus) {
+				return mixbus < o.mixbus;
+			}
+			return name < o.name;
+		}
+
+		bool operator== (RouteImportInfo const& o) {
+			return mixbus == o.mixbus && name == o.name;
+		}
+	};
+
+	bool export_route_state (std::shared_ptr<RouteList> rl, const std::string& path, bool with_sources);
+	int  import_route_state (const std::string& path, std::map<PBD::ID, PBD::ID> const&, RouteGroupImportMode rgim = CreateRouteGroup);
+
+	std::map<PBD::ID, RouteImportInfo> parse_route_state (const std::string& path, bool& match_pbd_id);
 
 	/// The instant xml file is written to the session directory
 	void add_instant_xml (XMLNode&, bool write_to_config = true);

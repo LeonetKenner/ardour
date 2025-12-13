@@ -557,8 +557,27 @@ MidiView::leave_internal()
 }
 
 bool
+MidiView::show_context_menu (GdkEventButton* ev)
+{
+	if (_on_timeline) {
+		/* this is handled at a higher level, so that operations apply
+		 * to all selected regions.
+		 */
+		return false;
+	}
+
+	Gtk::Menu* context_menu = _editing_context.get_single_region_context_menu ();
+	context_menu->popup (ev->button, ev->time);
+	return true;
+}
+
+bool
 MidiView::button_press (GdkEventButton* ev)
 {
+	if (Keyboard::is_context_menu_event (ev)) {
+		return show_context_menu (ev);
+	}
+
 	if (ev->button != 1) {
 		return false;
 	}
@@ -1288,6 +1307,9 @@ MidiView::model_changed()
 			}
 		}
 	}
+
+	/* don't sound any notes that are added due to undo/redo */
+	PBD::Unwinder<bool> uw (_no_sound_notes, true);
 
 	for (auto & note : missing_notes) {
 		NoteBase* cne;
@@ -2193,7 +2215,7 @@ MidiView::remove_canvas_patch_change (PatchChange* pc)
 {
 	/* remove the canvas item */
 	for (PatchChanges::iterator x = _patch_changes.begin(); x != _patch_changes.end(); ++x) {
-		if (x->second->patch() == pc->patch()) {
+		if (x->first == pc->patch()) {
 			_patch_changes.erase (x);
 			break;
 		}

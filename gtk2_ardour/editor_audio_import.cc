@@ -25,9 +25,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/time.h>
 #include <errno.h>
-#include <unistd.h>
 #include <algorithm>
 
 #include <sndfile.h>
@@ -61,7 +59,6 @@
 #include "editing.h"
 #include "audio_time_axis.h"
 #include "midi_time_axis.h"
-#include "session_import_dialog.h"
 #include "tempo_map_change.h"
 #include "gui_thread.h"
 #include "interthread_progress_window.h"
@@ -143,13 +140,6 @@ Editor::external_audio_dialog ()
 	}
 
 	sfbrowser->show_all ();
-}
-
-void
-Editor::session_import_dialog ()
-{
-	SessionImportDialog dialog (_session);
-	dialog.run ();
 }
 
 typedef std::map<PBD::ID,std::shared_ptr<ARDOUR::Source> > SourceMap;
@@ -293,7 +283,7 @@ Editor::import_smf_tempo_map (Evoral::SMF const & smf, timepos_t const & pos)
 
 	if (tmcb && !tmcb->empty()) {
 		std::cerr << "CB\n";
-		tmcb->dump (std::cerr); 
+		tmcb->dump (std::cerr);
 		wmap->paste (*tmcb, pos, false, _("import"));
 		TempoMap::update (wmap);
 		std::cerr << "final map\n";
@@ -753,7 +743,7 @@ Editor::embed_sndfiles (vector<string>            paths,
 
 int
 Editor::add_sources (vector<string>            paths,
-                     SourceList&               sources,
+                     SourceList&               possible_sources,
                      timepos_t&              pos,
                      ImportDisposition         disposition,
                      ImportMode                mode,
@@ -772,6 +762,18 @@ Editor::add_sources (vector<string>            paths,
 	vector<string> track_names;
 
 	use_timestamp = (pos == timepos_t::max (pos.time_domain()));
+
+	SourceList sources;
+
+	for (auto const & s : possible_sources) {
+		if (!s->empty()) {
+			sources.push_back (s);
+		}
+	}
+
+	if (sources.empty()) {
+		return -1;
+	}
 
 	// kludge (for MIDI we're abusing "channel" for "track" here)
 	if (SMFSource::safe_midi_file_extension (paths.front())) {
@@ -901,6 +903,7 @@ Editor::add_sources (vector<string>            paths,
 			}
 
 			regions.push_back (r);
+			++n;
 		}
 	}
 

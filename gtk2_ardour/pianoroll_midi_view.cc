@@ -55,6 +55,7 @@ PianorollMidiView::PianorollMidiView (std::shared_ptr<ARDOUR::MidiTrack> mt,
                                       MidiViewBackground&      bg,
                                       uint32_t                 basic_color)
 	: MidiView (mt, parent, ec, bg, basic_color)
+	, _noscroll_parent (&noscroll_parent)
 	, overlay_text (nullptr)
 	, active_automation (nullptr)
 	, velocity_display (nullptr)
@@ -196,18 +197,28 @@ PianorollMidiView::scroll (GdkEventScroll* ev)
 		return false;
 	}
 
-	if (Keyboard::modifier_state_equals (ev->state, Keyboard::PrimaryModifier)) {
-
-		switch (ev->direction) {
-		case GDK_SCROLL_UP:
+	switch (ev->direction) {
+	case GDK_SCROLL_UP:
+		if (Keyboard::modifier_state_equals (ev->state, Keyboard::ScrollHorizontalModifier)) {
+			_editing_context.scroll_left_step ();
+			return true;
+		}
+		if (Keyboard::modifier_state_equals (ev->state, Keyboard::PrimaryModifier)) {
 			_editing_context.reset_zoom (_editing_context.get_current_zoom() / 2);
 			return true;
-		case GDK_SCROLL_DOWN:
+		}
+	case GDK_SCROLL_DOWN:
+		if (Keyboard::modifier_state_equals (ev->state, Keyboard::ScrollHorizontalModifier)) {
+			_editing_context.scroll_right_step ();
+			return true;
+		}
+		if (Keyboard::modifier_state_equals (ev->state, Keyboard::PrimaryModifier)) {
 			_editing_context.reset_zoom (_editing_context.get_current_zoom() * 2);
 			return true;
-		default:
-			break;
 		}
+		break;
+	default:
+		break;
 	}
 
 	return MidiView::scroll (ev);
@@ -738,7 +749,7 @@ void
 PianorollMidiView::set_overlay_text (std::string const & str)
 {
 	if (!overlay_text) {
-		overlay_text = new ArdourCanvas::Text (_note_group->parent());
+		overlay_text = new ArdourCanvas::Text (_noscroll_parent);
 		Pango::FontDescription font ("Sans 200");
 		overlay_text->set_font_description (font);
 		overlay_text->set_color (0xff000088);

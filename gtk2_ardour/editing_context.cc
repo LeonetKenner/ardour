@@ -234,7 +234,6 @@ EditingContext::EditingContext (std::string const & name)
 
 	set_tooltip (play_note_selection_button, _("Play notes when selected"));
 	set_tooltip (note_mode_button, _("Switch between sustained and percussive mode"));
-	set_tooltip (follow_playhead_button, _("Scroll automatically to keep playhead visible"));
 	set_tooltip (follow_edits_button, _("Playhead follows Range tool clicks, and Range selections"));
 	/* Leave tip for full zoom button to derived class */
 	set_tooltip (visible_channel_selector, _("Select visible MIDI channel"));
@@ -428,15 +427,15 @@ EditingContext::set_action_defaults ()
 		grid_actions[Editing::GridTypeBeat]->set_active (false);
 		grid_actions[Editing::GridTypeBeat]->set_active (true);
 	}
-	if (draw_length_actions[DRAW_LEN_AUTO]) {
+	if (draw_length_actions.find (DRAW_LEN_AUTO) != draw_length_actions.end()) {
 		draw_length_actions[DRAW_LEN_AUTO]->set_active (false);
 		draw_length_actions[DRAW_LEN_AUTO]->set_active (true);
 	}
-	if (draw_velocity_actions[DRAW_VEL_AUTO]) {
+	if (draw_velocity_actions.find (DRAW_VEL_AUTO) != draw_velocity_actions.end()) {
 		draw_velocity_actions[DRAW_VEL_AUTO]->set_active (false);
 		draw_velocity_actions[DRAW_VEL_AUTO]->set_active (true);
 	}
-	if (draw_channel_actions[DRAW_CHAN_AUTO]) {
+	if (draw_channel_actions.find (DRAW_CHAN_AUTO) != draw_channel_actions.end()) {
 		draw_channel_actions[DRAW_CHAN_AUTO]->set_active (false);
 		draw_channel_actions[DRAW_CHAN_AUTO]->set_active (true);
 	}
@@ -455,6 +454,8 @@ EditingContext::register_common_actions (Bindings* common_bindings, std::string 
 	follow_playhead_action = toggle_reg_sens (_common_actions, "toggle-follow-playhead", _("Follow Playhead"), sigc::mem_fun (*this, &EditingContext::follow_playhead_chosen));
 	stationary_playhead_action = toggle_reg_sens (_common_actions, "toggle-stationary-playhead", _("Stationary Playhead"), (mem_fun(*this, &EditingContext::stationary_playhead_chosen)));
 
+	follow_playhead_action->set_tooltip (_("Scroll automatically to keep playhead visible"));
+
 	undo_action = reg_sens (_common_actions, "undo", S_("Command|Undo"), sigc::bind (sigc::mem_fun (*this, &EditingContext::undo), 1U));
 	redo_action = reg_sens (_common_actions, "redo", _("Redo"), sigc::bind (sigc::mem_fun (*this, &EditingContext::redo), 1U));
 	alternate_redo_action = reg_sens (_common_actions, "alternate-redo", _("Redo"), sigc::bind (sigc::mem_fun (*this, &EditingContext::redo), 1U));
@@ -466,6 +467,10 @@ EditingContext::register_common_actions (Bindings* common_bindings, std::string 
 	reg_sens (_common_actions, "editor-cut", _("Cut"), sigc::mem_fun (*this, &EditingContext::cut));
 	reg_sens (_common_actions, "editor-copy", _("Copy"), sigc::mem_fun (*this, &EditingContext::copy));
 	reg_sens (_common_actions, "editor-paste", _("Paste"), sigc::mem_fun (*this, &EditingContext::keyboard_paste));
+
+	RadioAction::Group note_mode_group;
+	note_mode_actions[ARDOUR::Sustained] = ActionManager::register_radio_action (_common_actions, note_mode_group, "set-note-mode-sustained", _("Sustained"), sigc::bind (sigc::mem_fun (*this, &EditingContext::note_mode_chosen), ARDOUR::Sustained));
+	note_mode_actions[ARDOUR::Percussive] = ActionManager::register_radio_action (_common_actions, note_mode_group, "set-note-mode-percussivee", _("Percussive"), sigc::bind (sigc::mem_fun (*this, &EditingContext::note_mode_chosen), ARDOUR::Percussive));
 
 	RadioAction::Group mouse_mode_group;
 
@@ -1144,7 +1149,9 @@ EditingContext::set_draw_length (GridType gt)
 {
 	EC_LOCAL_TEMPO_SCOPE;
 
-	draw_length_actions[gt]->set_active (true);
+	if (draw_length_actions.find (gt) != draw_length_actions.end() && draw_length_actions[gt]) {
+		draw_length_actions[gt]->set_active (true);
+	}
 }
 
 void
@@ -1152,11 +1159,11 @@ EditingContext::set_draw_velocity (int v)
 {
 	EC_LOCAL_TEMPO_SCOPE;
 
-	if (v == DRAW_VEL_AUTO) {
-		draw_velocity_actions[v]->set_active (true);
-	} else {
-		draw_velocity_actions[std::max (std::min (v, 127), 0)]->set_active (true);
+	if (draw_velocity_actions.find (v) == draw_velocity_actions.end() || draw_velocity_actions[v]) {
+		return;
 	}
+
+	draw_velocity_actions[v]->set_active (true);
 }
 
 void
@@ -1164,11 +1171,11 @@ EditingContext::set_draw_channel (int c)
 {
 	EC_LOCAL_TEMPO_SCOPE;
 
-	if (c == DRAW_CHAN_AUTO) {
-		draw_channel_actions[c]->set_active (true);
-	} else {
-		draw_channel_actions[std::max (std::min (c, 15), 0)]->set_active (true);
+	if (draw_channel_actions.find (c) == draw_channel_actions.end() || draw_channel_actions[c]) {
+		return;
 	}
+
+	draw_channel_actions[c]->set_active (true);
 }
 
 void
@@ -2344,8 +2351,11 @@ EditingContext::bind_mouse_mode_buttons ()
 	RefPtr<Action> act;
 
 	act = ActionManager::get_action ((_name + X_("Editing")).c_str(), X_("temporal-zoom-in"));
+	act->set_tooltip (_("Zoom In"));
 	zoom_in_button.set_related_action (act);
+
 	act = ActionManager::get_action ((_name + X_("Editing")).c_str(), X_("temporal-zoom-out"));
+	act->set_tooltip (_("Zoom Out"));
 	zoom_out_button.set_related_action (act);
 
 	follow_playhead_button.set_related_action (follow_playhead_action);
@@ -3915,4 +3925,57 @@ EditingContext::set_minsec_ruler_scale (samplepos_t lower, samplepos_t upper)
 		minsec_mark_interval = minsec_mark_modulo * (60 * 60 * fr);
 		minsec_ruler_scale = minsec_show_many_hours;
 	}
+}
+
+void
+EditingContext::scroll_left_step ()
+{
+	samplepos_t xdelta = (current_page_samples() / 8);
+
+	if (_leftmost_sample > xdelta) {
+		reset_x_origin (_leftmost_sample - xdelta);
+	} else {
+		reset_x_origin (0);
+	}
+}
+
+
+void
+EditingContext::scroll_right_step ()
+{
+	samplepos_t xdelta = (current_page_samples() / 8);
+
+	if (max_samplepos - xdelta > _leftmost_sample) {
+		reset_x_origin (_leftmost_sample + xdelta);
+	} else {
+		reset_x_origin (max_samplepos - current_page_samples());
+	}
+}
+
+void
+EditingContext::scroll_left_half_page ()
+{
+	samplepos_t xdelta = (current_page_samples() / 2);
+	if (_leftmost_sample > xdelta) {
+		reset_x_origin (_leftmost_sample - xdelta);
+	} else {
+		reset_x_origin (0);
+	}
+}
+
+void
+EditingContext::scroll_right_half_page ()
+{
+	samplepos_t xdelta = (current_page_samples() / 2);
+	if (max_samplepos - xdelta > _leftmost_sample) {
+		reset_x_origin (_leftmost_sample + xdelta);
+	} else {
+		reset_x_origin (max_samplepos - current_page_samples());
+	}
+}
+
+Gtk::Menu*
+EditingContext::get_single_region_context_menu ()
+{
+	return nullptr;
 }

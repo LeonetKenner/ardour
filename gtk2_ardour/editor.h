@@ -229,7 +229,7 @@ public:
 
 	bool extend_selection_to_track (TimeAxisView&);
 
-	void edit_region_in_pianoroll_window ();
+	void edit_region_in_dedicated_window ();
 	void maybe_edit_region_in_bottom_pane (RegionView&);
 
 	void play_selection ();
@@ -343,12 +343,6 @@ public:
 
 	bool scroll_up_one_track (bool skip_child_views = false);
 	bool scroll_down_one_track (bool skip_child_views = false);
-
-	void scroll_left_step ();
-	void scroll_right_step ();
-
-	void scroll_left_half_page ();
-	void scroll_right_half_page ();
 
 	void select_topmost_track ();
 
@@ -1162,7 +1156,6 @@ private:
 	void remove_selected_regions ();
 	void remove_regions (const RegionSelection&, bool can_ripple, bool as_part_of_other_command);
 	void remove_clicked_region ();
-	void show_region_properties ();
 	void show_midi_list_editor ();
 	void rename_region ();
 	void duplicate_some_regions (RegionSelection&, float times);
@@ -1312,7 +1305,6 @@ private:
 
 	/* import & embed */
 	void external_audio_dialog ();
-	void session_import_dialog ();
 
 	/* PT import specific */
 	void external_pt_dialog ();

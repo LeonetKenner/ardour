@@ -123,6 +123,11 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 	virtual void stop_canvas_autoscroll () = 0;
 	virtual bool autoscroll_active() const = 0;
 
+	void scroll_left_step ();
+	void scroll_right_step ();
+	void scroll_left_half_page ();
+	void scroll_right_half_page ();
+
 	virtual void redisplay_grid (bool immediate_redraw) = 0;
 	virtual Temporal::timecnt_t get_nudge_distance (Temporal::timepos_t const & pos, Temporal::timecnt_t& next) const = 0;
 
@@ -292,10 +297,12 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 	void set_draw_length (Editing::GridType);
 	void set_draw_velocity (int);
 	void set_draw_channel (int);
+	virtual void set_note_mode (ARDOUR::NoteMode) {}
 
 	Editing::GridType  draw_length () const;
 	int                draw_velocity () const;
 	int                draw_channel () const;
+	virtual ARDOUR::NoteMode note_mode() const { return ARDOUR::Sustained; }
 
 	Editing::SnapMode  snap_mode () const;
 
@@ -513,6 +520,8 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 		std::shared_ptr<Evoral::ControlList> copy; ///< copied events for the cut buffer
 	};
 
+	virtual Gtk::Menu* get_single_region_context_menu ();
+
   protected:
 	std::string _name;
 	bool within_track_canvas;
@@ -543,6 +552,7 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 	std::map<Editing::SnapMode, Glib::RefPtr<Gtk::RadioAction> > snap_mode_actions;
 	std::map<Editing::GridType, Glib::RefPtr<Gtk::RadioAction> > draw_length_actions;
 	std::map<Editing::MouseMode, Glib::RefPtr<Gtk::RadioAction> > mouse_mode_actions;
+	std::map<ARDOUR::NoteMode, Glib::RefPtr<Gtk::RadioAction> > note_mode_actions;
 	std::map<Editing::ZoomFocus, Glib::RefPtr<Gtk::RadioAction> > zoom_focus_actions;
 	std::map<int, Glib::RefPtr<Gtk::RadioAction> > draw_velocity_actions;
 	std::map<int, Glib::RefPtr<Gtk::RadioAction> > draw_channel_actions;
@@ -550,6 +560,7 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 	void draw_channel_chosen (int);
 	void draw_velocity_chosen (int);
 	void draw_length_chosen (Editing::GridType);
+	virtual void note_mode_chosen (ARDOUR::NoteMode) {}
 
 	sigc::signal<void> DrawLengthChanged;
 	sigc::signal<void> DrawVelocityChanged;
@@ -693,7 +704,7 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 
 	void note_edit_done (int, EditNoteDialog*);
 
-	MidiViews midiviews_from_region_selection (RegionSelection const &) const;
+	virtual MidiViews midiviews_from_region_selection (RegionSelection const &) const;
 
 	/** the adjustment that controls the overall editing vertical scroll position */
 	friend class EditorSummary;

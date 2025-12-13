@@ -489,10 +489,15 @@ CueEditor::build_upper_toolbar ()
 		play_button.set_size_request (PX_SCALE(20), PX_SCALE(20));
 #undef PX_SCALE
 
+		set_tooltip (play_button, _("Play this clip from the top"));
+		set_tooltip (loop_button, _("Loop the range of this clip"));
+		set_tooltip (solo_button, _("Solo the track containing this clip"));
+
 		play_button.signal_button_release_event().connect (sigc::mem_fun (*this, &CueEditor::play_button_press), false);
 		solo_button.signal_button_release_event().connect (sigc::mem_fun (*this, &CueEditor::solo_button_press), false);
 		loop_button.signal_button_release_event().connect (sigc::mem_fun (*this, &CueEditor::loop_button_press), false);
 	} else {
+		set_tooltip (play_button, _("Launch selected clip"));
 		rec_box.pack_start (play_button, false, false);
 		play_button.signal_button_release_event().connect (sigc::mem_fun (*this, &CueEditor::bang_button_press), false);
 	}
@@ -501,6 +506,9 @@ CueEditor::build_upper_toolbar ()
 	rec_enable_button.set_sensitive (false);
 	rec_enable_button.signal_button_release_event().connect (sigc::mem_fun (*this, &CueEditor::rec_button_press), false);
 	rec_enable_button.set_name ("record enable button");
+
+	set_tooltip (rec_enable_button, _("Record clip"));
+	set_tooltip (length_selector, _("Record length"));
 
 	std::string label;
 	std::string noun;
@@ -707,6 +715,7 @@ CueEditor::rec_enable_change ()
 		break;
 	case Disabled:
 		rec_enable_button.set_active_state (Gtkmm2ext::Off);
+		hide_count_in ();
 		break;
 	}
 }
@@ -1447,6 +1456,7 @@ CueEditor::maybe_set_count_in ()
 	}
 
 	if (ref.box()->record_enabled() == Disabled) {
+		hide_count_in ();
 		return;
 	}
 
@@ -1976,15 +1986,19 @@ CueEditor::set_start (Temporal::timepos_t const & p)
 {
 	EC_LOCAL_TEMPO_SCOPE;
 
+	begin_reversible_command (_("trim region front"));
+
 	if (ref.trigger()) {
+		ref.trigger()->the_region()->clear_changes ();
 		ref.trigger()->the_region()->trim_front (p);
+		add_command (new PBD::StatefulDiffCommand (ref.trigger()->the_region()));
 	} else if (_region) {
-		begin_reversible_command (_("trim region front"));
 		_region->clear_changes ();
 		_region->trim_front (_region->source_position() + p);
 		add_command (new PBD::StatefulDiffCommand (_region));
-		commit_reversible_command ();
 	}
+
+	commit_reversible_command ();
 }
 
 void
@@ -1992,13 +2006,17 @@ CueEditor::set_end (Temporal::timepos_t const & p)
 {
 	EC_LOCAL_TEMPO_SCOPE;
 
+	begin_reversible_command (_("trim region end"));
+
 	if (ref.trigger()) {
+		ref.trigger()->the_region()->clear_changes ();
 		ref.trigger()->the_region()->trim_end (p);
+		add_command (new PBD::StatefulDiffCommand (ref.trigger()->the_region()));
 	} else if (_region) {
-		begin_reversible_command (_("trim region end"));
 		_region->clear_changes ();
 		_region->trim_end (_region->source_position() + p);
 		add_command (new PBD::StatefulDiffCommand (_region));
-		commit_reversible_command ();
 	}
+
+	commit_reversible_command ();
 }

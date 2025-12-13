@@ -286,10 +286,6 @@ class LIBARDOUR_API Trigger : public PBD::Stateful {
 	virtual pframes_t run (BufferSet&, samplepos_t start_sample, samplepos_t end_sample,
 	                       Temporal::Beats const & start, Temporal::Beats const & end,
 	                       pframes_t nframes, pframes_t offset, double bpm, pframes_t& quantize_offset) = 0;
-	virtual void set_start (timepos_t const &) = 0;
-	virtual void set_end (timepos_t const &) = 0;
-	virtual void set_length (timecnt_t const &) = 0;
-	virtual void reload (BufferSet&, void*) = 0;
 	virtual void io_change () {}
 	virtual void set_legato_offset (timepos_t const & offset) = 0;
 
@@ -318,10 +314,6 @@ class LIBARDOUR_API Trigger : public PBD::Stateful {
 	bool cue_launched() const { return _cue_launched; }
 
 	virtual bool probably_oneshot () const = 0;
-
-	virtual timepos_t start_offset () const = 0; /* offset from start of data */
-	virtual timepos_t current_length() const = 0; /* offset from start() */
-	virtual timepos_t natural_length() const = 0; /* offset from start() */
 
 	void process_state_requests (BufferSet& bufs, pframes_t dest_offset);
 
@@ -431,12 +423,12 @@ class LIBARDOUR_API Trigger : public PBD::Stateful {
 	void get_ui_state (UIState &state) const;
 	void set_ui_state (UIState &state);
 
-	virtual void check_edit_swap (timepos_t const & time, bool playing, BufferSet& bufs) {}
+	virtual void check_edit_swap (timepos_t const & time, bool playing, BufferSet& bufs) = 0;
 
 	static PBD::Signal<void(PBD::PropertyChange,Trigger*)> TriggerPropertyChange;
 
 	void region_property_change (PBD::PropertyChange const &);
-	virtual void bounds_changed (Temporal::timepos_t const & start, Temporal::timepos_t const & end) {}
+	virtual void bounds_changed (Temporal::timepos_t const & start, Temporal::timepos_t const & end, Temporal::timecnt_t const & len);
 
   protected:
 	struct UIRequests {
@@ -446,7 +438,7 @@ class LIBARDOUR_API Trigger : public PBD::Stateful {
 
 	std::shared_ptr<Region> _region;
 	samplecnt_t                process_index;
-	samplepos_t                final_processed_sample;  /* where we stop playing, in process time, compare with process_index */
+	samplepos_t                final_process_index;  /* where we stop playing, in process time, compare with process_index */
 	UIState                    ui_state;
 	TriggerBox&               _box;
 	UIRequests                _requests;
@@ -505,6 +497,22 @@ class LIBARDOUR_API Trigger : public PBD::Stateful {
 	void send_property_change (PBD::PropertyChange pc);
 
 	virtual void _arm (Temporal::BBT_Offset const &);
+
+	struct PendingSwap {
+		timepos_t play_start;
+		timepos_t play_end;
+		timepos_t loop_start;
+		timepos_t loop_end;
+		timecnt_t length;
+
+		virtual ~PendingSwap() {}
+	};
+
+	std::atomic<PendingSwap*> pending_swap;
+	std::atomic<PendingSwap*> old_pending_swap;
+
+	virtual int load_pending_data (PendingSwap&) = 0;
+	virtual PendingSwap* pending_factory() const = 0;
 };
 
 class LIBARDOUR_API AudioTrigger : public Trigger {
@@ -531,14 +539,8 @@ class LIBARDOUR_API AudioTrigger : public Trigger {
 	double segment_beatcnt () { return _beatcnt; }
 	void set_segment_beatcnt (double count);
 
-	void set_start (timepos_t const &);
-	void set_end (timepos_t const &);
 	void set_legato_offset (timepos_t const &);
 	void set_length (timecnt_t const &);
-	timepos_t start_offset () const; /* offset from start of data */
-	timepos_t current_length() const; /* offset from start of data */
-	timepos_t natural_length() const; /* offset from start of data */
-	void reload (BufferSet&, void*);
 	void io_change ();
 	bool probably_oneshot () const;
 
@@ -569,24 +571,35 @@ class LIBARDOUR_API AudioTrigger : public Trigger {
 
 		AudioData () : length (0), capacity (0) {}
 		~AudioData ();
+		AudioData& operator= (AudioData& other); /* really move semantics */
 
 		samplecnt_t append (Sample const * src, samplecnt_t cnt, uint32_t chan);
 		void alloc (samplecnt_t cnt, uint32_t nchans);
 		void reset () { length = 0; }
+		void drop ();
 	};
 
 
 	Sample const * audio_data (size_t n) const;
 	size_t data_length() const { return data.length; }
 
+	struct AudioPendingSwap : public PendingSwap {
+		AudioData audio_data;
+
+		AudioPendingSwap() {}
+		~AudioPendingSwap() {}
+	};
+
+	void check_edit_swap (timepos_t const &, bool playing, BufferSet&);
+
   protected:
 	void retrigger ();
+	PendingSwap* pending_factory() const;
+	int load_pending_data (PendingSwap&);
 
   private:
-	AudioData        data;
+	AudioData         data;
 	RubberBand::RubberBandStretcher*  _stretcher;
-	samplepos_t _start_offset;
-
 
 	/* computed during run */
 
@@ -600,8 +613,8 @@ class LIBARDOUR_API AudioTrigger : public Trigger {
 
 	virtual void setup_stretcher ();
 
-	void drop_data ();
-	int load_data (std::shared_ptr<AudioRegion>);
+	void drop_data (AudioData&);
+	int load_data (std::shared_ptr<AudioRegion>, AudioData&);
 	void estimate_tempo ();
 	void reset_stretcher ();
 	void _startup (BufferSet&, pframes_t dest_offset, Temporal::BBT_Offset const &);
@@ -632,9 +645,6 @@ class LIBARDOUR_API MIDITrigger : public Trigger {
 	void set_length (timecnt_t const &);
 	timepos_t start_offset () const;
 	timepos_t end() const;            /* offset from start of data */
-	timepos_t current_length() const; /* offset from start of data */
-	timepos_t natural_length() const; /* offset from start of data */
-	void reload (BufferSet&, void*);
 	bool probably_oneshot () const;
 
 	void tempo_map_changed();
@@ -675,9 +685,9 @@ class LIBARDOUR_API MIDITrigger : public Trigger {
 	std::vector<int> const & channel_map() const { return _channel_map; }
 
 	void check_edit_swap (timepos_t const &, bool playing, BufferSet&);
-	RTMidiBufferBeats const & rt_midi_buffer() const { return *rt_midibuffer.load(); }
+	PendingSwap* pending_factory() const;
 
-	void bounds_changed (Temporal::timepos_t const & start, Temporal::timepos_t const & end);
+	RTMidiBufferBeats const & rt_midi_buffer() const { return *rt_midibuffer.load(); }
 
 	Temporal::Beats play_start() const { return _play_start; }
 	Temporal::Beats play_end() const { return _play_end; }
@@ -687,6 +697,8 @@ class LIBARDOUR_API MIDITrigger : public Trigger {
   protected:
 	void retrigger ();
 	void _arm (Temporal::BBT_Offset const &);
+	void adjust_bounds (Temporal::timepos_t const & start, Temporal::timepos_t const & end, Temporal::timecnt_t const & length, bool from_region);
+	int load_pending_data (PendingSwap&);
 
   private:
 	PBD::ID data_source;
@@ -714,20 +726,12 @@ class LIBARDOUR_API MIDITrigger : public Trigger {
 	std::atomic<RTMidiBufferBeats*> rt_midibuffer;
 	uint32_t iter; /* index into the above RTMidiBufferBeats for current playback */
 
-	struct PendingSwap {
+	struct MIDIPendingSwap : public PendingSwap {
 		RTMidiBufferBeats* rt_midibuffer;
-		Temporal::Beats play_start;
-		Temporal::Beats play_end;
-		Temporal::Beats loop_start;
-		Temporal::Beats loop_end;
-		Temporal::Beats length;
 
-		PendingSwap() : rt_midibuffer (nullptr) {}
-		~PendingSwap() { delete rt_midibuffer; }
+		MIDIPendingSwap();
+		~MIDIPendingSwap() { delete rt_midibuffer; }
 	};
-
-	std::atomic<PendingSwap*> pending_swap;
-	std::atomic<PendingSwap*> old_pending_swap;
 
 	bool         map_change;
 
@@ -735,7 +739,6 @@ class LIBARDOUR_API MIDITrigger : public Trigger {
 	void compute_and_set_length ();
 	void _startup (BufferSet&, pframes_t dest_offset, Temporal::BBT_Offset const &);
 	void setup_event_indices ();
-	void adjust_bounds (Temporal::Beats const & start, Temporal::Beats const & end, Temporal::Beats const & length, bool from_region);
 };
 
 class LIBARDOUR_API TriggerBoxThread
@@ -916,7 +919,6 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	TriggerPtr get_next_trigger ();
 	TriggerPtr peek_next_trigger ();
 
-	void request_reload (int32_t slot, void*);
 	void set_region (uint32_t slot, std::shared_ptr<Region> region);
 
 	void non_realtime_transport_stop (samplepos_t now, bool flush);
@@ -1039,7 +1041,6 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 	struct Request {
 		enum Type {
 			Use,
-			Reload,
 		};
 
 		Type type;
@@ -1066,8 +1067,6 @@ class LIBARDOUR_API TriggerBox : public Processor, public std::enable_shared_fro
 
 	void process_requests (BufferSet&);
 	void process_request (BufferSet&, Request*);
-
-	void reload (BufferSet& bufs, int32_t slot, void* ptr);
 
 	void cancel_locate_armed ();
 	void fast_forward_nothing_to_do ();

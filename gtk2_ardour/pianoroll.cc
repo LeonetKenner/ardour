@@ -74,7 +74,6 @@ Pianoroll::Pianoroll (std::string const & name, bool with_transport)
 	, bg (nullptr)
 	, view (nullptr)
 	, bbt_metric (*this)
-	, _note_mode (Sustained)
 	, ignore_channel_changes (false)
 {
 	autoscroll_vertical_allowed = false;
@@ -558,7 +557,6 @@ Pianoroll::maybe_update ()
 			}
 
 			if (_track->triggerbox()->record_enabled() == Recording) {
-
 				_playhead_cursor->set_position (data_capture_duration);
 			}
 
@@ -1353,7 +1351,6 @@ Pianoroll::trigger_prop_change (PBD::PropertyChange const & what_changed)
 	EC_LOCAL_TEMPO_SCOPE;
 
 	if (what_changed.contains (Properties::region)) {
-		std::cerr << "PR region changed\n";
 		std::shared_ptr<MidiRegion> mr = std::dynamic_pointer_cast<MidiRegion> (ref.trigger()->the_region());
 		set_region (mr);
 	}
@@ -1478,6 +1475,13 @@ Pianoroll::set_region (std::shared_ptr<ARDOUR::Region> region)
 	bg->display_region (*view);
 
 	maybe_set_from_rsu ();
+
+	if (r->source()->empty()) {
+		std::shared_ptr<MidiTrack> mt (std::dynamic_pointer_cast<ARDOUR::MidiTrack> (_track));
+		if (mt) {
+			note_mode_actions[mt->note_mode()]->set_active (true);
+		}
+	}
 }
 
 bool
@@ -1589,6 +1593,40 @@ Pianoroll::automation_state_changed ()
 	}
 }
 
+ARDOUR::NoteMode
+Pianoroll::note_mode () const
+{
+	return bg->note_mode();
+}
+
+void
+Pianoroll::note_mode_chosen (ARDOUR::NoteMode mode)
+{
+	EC_LOCAL_TEMPO_SCOPE;
+
+	/* this is driven by a toggle on a radio group, and so is invoked twice,
+	   once for the item that became inactive and once for the one that became
+	   active.
+	*/
+
+	Glib::RefPtr<Gtk::RadioAction> ract = note_mode_actions[mode];
+
+	if (!ract->get_active()) {
+		return;
+	}
+
+	if (mode != bg->note_mode()) {
+		bg->set_note_mode (mode);
+		if (bg->note_mode() == Percussive) {
+			note_mode_button.set_active_state (Gtkmm2ext::ExplicitActive);
+		} else {
+			note_mode_button.set_active_state (Gtkmm2ext::Off);
+		}
+	}
+
+	instant_save ();
+}
+
 void
 Pianoroll::note_mode_clicked ()
 {
@@ -1596,27 +1634,11 @@ Pianoroll::note_mode_clicked ()
 
 	assert (bg);
 
+
 	if (bg->note_mode() == Sustained) {
-		set_note_mode (Percussive);
+		note_mode_actions[Percussive]->set_active (true);
 	} else {
-		set_note_mode (Sustained);
-	}
-}
-
-void
-Pianoroll::set_note_mode (NoteMode nm)
-{
-	EC_LOCAL_TEMPO_SCOPE;
-
-	assert (bg);
-
-	if (nm != bg->note_mode()) {
-		bg->set_note_mode (nm);
-		if (bg->note_mode() == Percussive) {
-			note_mode_button.set_active_state (Gtkmm2ext::ExplicitActive);
-		} else {
-			note_mode_button.set_active_state (Gtkmm2ext::Off);
-		}
+		note_mode_actions[Sustained]->set_active (true);
 	}
 }
 
@@ -1870,6 +1892,8 @@ Pianoroll::map_transport_state ()
 		} else {
 			loop_button.set_active (false);
 		}
+
+		hide_count_in ();
 	}
 }
 
@@ -2038,6 +2062,13 @@ Pianoroll::hide_count_in ()
 }
 
 void
+Pianoroll::set_from_rsu (RegionUISettings& region_ui_settings)
+{
+	note_mode_actions[region_ui_settings.note_mode]->set_active (true);
+	CueEditor::set_from_rsu (region_ui_settings);
+}
+
+void
 Pianoroll::instant_save ()
 {
 	EC_LOCAL_TEMPO_SCOPE;
@@ -2047,6 +2078,7 @@ Pianoroll::instant_save ()
 	region_ui_settings.channel = draw_channel();
 	region_ui_settings.note_min = bg->lowest_note ();
 	region_ui_settings.note_max = bg->highest_note();
+	region_ui_settings.note_mode = note_mode ();
 
 	CueEditor::instant_save ();
 }
@@ -2073,4 +2105,37 @@ Pianoroll::source_to_timeline (timepos_t const & source_pos) const
 	}
 
 	return source_pos;
+}
+
+Gtk::Menu*
+Pianoroll::get_single_region_context_menu ()
+{
+	using namespace Gtk;
+	using namespace Menu_Helpers;
+
+	Menu* m = new Menu;
+	MenuList& items (m->items());
+
+	items.push_back (MenuElem (_("Quantize..."), sigc::mem_fun (*this, &EditingContext::quantize_region)));
+	items.push_back (MenuElem (_("Legatize"), sigc::bind(sigc::mem_fun (*this, &EditingContext::legatize_region), false)));
+	items.push_back (MenuElem (_("Transform..."), sigc::mem_fun (*this, &EditingContext::transform_region)));
+	items.push_back (MenuElem (_("Remove Overlap"), sigc::bind(sigc::mem_fun (*this, &EditingContext::legatize_region), true)));
+	// items.push_back (MenuElem (_("Insert Patch Change..."), sigc::bind (sigc::mem_fun (*this, &EditingContext::insert_patch_change), false)));
+	// items.push_back (MenuElem (_("Insert Patch Change..."), sigc::bind (sigc::mem_fun (*this, &EditingContext::insert_patch_change), true)));
+
+	return m;
+}
+
+EditingContext::MidiViews
+Pianoroll::midiviews_from_region_selection (RegionSelection const &) const
+{
+	/* there is no region selection */
+
+	MidiViews mv;
+
+	if (midi_view()) {
+		mv.push_back (midi_view());
+	}
+
+	return mv;
 }

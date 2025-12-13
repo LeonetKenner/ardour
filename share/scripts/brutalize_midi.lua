@@ -1,7 +1,7 @@
 ardour { ["type"] = "EditorAction", name = "Brutalize MIDI",
 	license     = "MIT",
 	author      = "Ardour Team",
-	description = [[Randomize MIDI Note position (de-quantize).]]
+	description = [[Randomize MIDI Note position (de-quantize) of selected MIDI regions.]]
 }
 
 function factory () return function ()
@@ -34,7 +34,7 @@ function factory () return function ()
 	local rv = LuaDialog.Dialog ("Select Automation State", dialog_options):run()
 	if not rv then return end
 
-	-- calclate max distance in 'ticks'
+	-- calculate max distance in 'ticks'
 	local ticks_per_beat = Temporal.Beats (1, 0):to_ticks ();
 	local max_distance   = ticks_per_beat / rv['divisor']
 
@@ -58,7 +58,7 @@ function factory () return function ()
 
 			-- ..generate random offset..
 			local tickdiff = math.floor (rv['rand']() * max_distance);
-			print (old_pos:get_beats (), old_pos:get_ticks (), tickdiff)
+			--print (old_pos:get_beats (), old_pos:get_ticks (), tickdiff)
 
 			-- .. and calculate new position.
 			local new_pos = Temporal.Beats (old_pos:get_beats (), old_pos:get_ticks () + tickdiff)
