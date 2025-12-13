@@ -1,4 +1,4 @@
-name: Build Ardour (MinGW Native)
+name: Build Ardour (Native Windows MinGW)
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-mingw-native:
+  build-win-native:
     runs-on: windows-latest
     
     steps:
@@ -17,42 +17,67 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup MSYS2 (Like apt for MinGW)
+      - name: Setup MSYS2 & Install Deps
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
-          # These are the pre-built binaries (the "PPA" equivalent)
           install: >-
-            git make python3 diffutils
+            git python3 make pkg-config diffutils
             mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-autotools
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-libtool
+            mingw-w64-x86_64-itstool
+            mingw-w64-x86_64-gettext
             mingw-w64-x86_64-boost
+            mingw-w64-x86_64-cppunit
             mingw-w64-x86_64-glib2
             mingw-w64-x86_64-glibmm
             mingw-w64-x86_64-gtk3
             mingw-w64-x86_64-gtkmm3
             mingw-w64-x86_64-cairomm
             mingw-w64-x86_64-pangomm
-            mingw-w64-x86_64-libsndfile
-            mingw-w64-x86_64-libarchive
-            mingw-w64-x86_64-liblo
-            mingw-w64-x86_64-taglib
-            mingw-w64-x86_64-fftw
             mingw-w64-x86_64-libxml2
+            mingw-w64-x86_64-libxslt
+            mingw-w64-x86_64-libarchive
+            mingw-w64-x86_64-libsndfile
             mingw-w64-x86_64-libsamplerate
+            mingw-w64-x86_64-taglib
+            mingw-w64-x86_64-vamp-plugin-sdk
+            mingw-w64-x86_64-rubberband
+            mingw-w64-x86_64-aubio
+            mingw-w64-x86_64-fftw
+            mingw-w64-x86_64-curl
+            mingw-w64-x86_64-liblo
+            mingw-w64-x86_64-libwebsockets
+            mingw-w64-x86_64-libusb
             mingw-w64-x86_64-jack2
+            mingw-w64-x86_64-portaudio
             mingw-w64-x86_64-lilv
             mingw-w64-x86_64-serd
             mingw-w64-x86_64-sord
             mingw-w64-x86_64-sratom
-            mingw-w64-x86_64-portaudio
+            mingw-w64-x86_64-suil
+            mingw-w64-x86_64-liblrdf
+            mingw-w64-x86_64-raptor
+            mingw-w64-x86_64-rasqal
+            mingw-w64-x86_64-redland
+            mingw-w64-x86_64-flac
+            mingw-w64-x86_64-libvorbis
+            mingw-w64-x86_64-libogg
+            mingw-w64-x86_64-readline
+            mingw-w64-x86_64-libgnurx
 
-      - name: Configure Build
+      - name: Configure
         shell: msys2 {0}
         run: |
-          # We are running natively on Windows now.
-          # --dist-target=mingw sets up the windows-specific flags automatically.
+          # Explicitly force MinGW Compilers to stop MSVC auto-detection
+          export CC=gcc
+          export CXX=g++
+          export AR=gcc-ar
+          export NM=gcc-nm
+          export RANLIB=gcc-ranlib
           
           python ./waf configure \
             --dist-target=mingw \
@@ -63,7 +88,7 @@ jobs:
             --with-backends=jack,portaudio,dummy \
             --prefix=$GITHUB_WORKSPACE/_install
 
-      - name: Build Ardour
+      - name: Build
         shell: msys2 {0}
         run: |
           python ./waf
