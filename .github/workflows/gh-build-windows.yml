@@ -67,41 +67,24 @@ jobs:
             mingw-w64-x86_64-readline
             mingw-w64-x86_64-libgnurx
 
-      - name: Bruteforce Find GCC & Verify
+      - name: Bruteforce Find GCC
         shell: msys2 {0}
         run: |
-          echo "--- Searching for GCC ---"
-          # Find gcc.exe inside the mingw64 folder
           FOUND_GCC=$(find /mingw64 -name "gcc.exe" | head -n 1)
           FOUND_GXX=$(find /mingw64 -name "g++.exe" | head -n 1)
-          
-          if [ -z "$FOUND_GCC" ]; then
-             echo "CRITICAL ERROR: gcc.exe not found in /mingw64!"
-             exit 1
-          fi
-          
-          echo "Found GCC at: $FOUND_GCC"
-          echo "Found G++ at: $FOUND_GXX"
-          
-          # Verify version
-          "$FOUND_GCC" --version
-          
-          # Export to GITHUB_ENV so next steps can use it (MSYS style)
           echo "REAL_GCC=$FOUND_GCC" >> $GITHUB_ENV
           echo "REAL_GXX=$FOUND_GXX" >> $GITHUB_ENV
 
-      - name: Configure (Force GCC)
+      - name: Configure (Force Link Flags)
         shell: msys2 {0}
         run: |
-          # We use the env vars found in the previous step
           export CC="$REAL_GCC"
           export CXX="$REAL_GXX"
           
-          echo "Forcing CC to: $CC"
-          echo "Forcing CXX to: $CXX"
-          
-          # Using standard waf flag --check-c-compiler=gcc to attempt to override auto-detection
-          # Also passing CC/CXX inline to be safe.
+          # FORCE LINKER to see missing libs
+          # -lfftw3f (Float precision FFTW)
+          # -lserd-0 (RDF syntax)
+          export LINKFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
           
           /mingw64/bin/python ./waf configure \
             --dist-target=mingw \
