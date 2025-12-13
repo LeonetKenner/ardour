@@ -1,0 +1,69 @@
+name: Cross-Compile Ardour (MinGW-w64 on Linux)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-cross-mingw:
+    runs-on: ubuntu-latest
+    container: fedora:39
+
+    env:
+      CC: x86_64-w64-mingw32-gcc
+      CXX: x86_64-w64-mingw32-g++
+      WINDRES: x86_64-w64-mingw32-windres
+      PKG_CONFIG_LIBDIR: /usr/x86_64-w64-mingw32/sys-root/mingw/lib/pkgconfig:/usr/x86_64-w64-mingw32/sys-root/mingw/share/pkgconfig
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install MinGW Dependencies (Fedora)
+        run: |
+          dnf -y update
+          dnf -y install \
+            git python3 make diffutils \
+            mingw64-gcc mingw64-gcc-c++ mingw64-pkg-config \
+            mingw64-boost \
+            mingw64-glib2 mingw64-glibmm24 \
+            mingw64-gtk3 mingw64-gtkmm30 \
+            mingw64-cairomm mingw64-pangomm \
+            mingw64-libsndfile mingw64-libarchive \
+            mingw64-libcurl mingw64-liblo \
+            mingw64-taglib mingw64-fftw \
+            mingw64-libxml2 mingw64-libsamplerate \
+            mingw64-jack-audio-connection-kit \
+            mingw64-lilv mingw64-serd mingw64-sord mingw64-sratom \
+            mingw64-dlfcn \
+            mingw64-portaudio 
+
+      - name: Configure for MinGW
+        run: |
+          ./waf configure \
+            --dist-target=mingw \
+            --optimize \
+            --ptformat \
+            --no-dr-mingw \
+            --cxx17 \
+            --with-backends=jack,portaudio,dummy \
+            --prefix=/output
+
+      - name: Build Ardour
+        run: |
+          ./waf
+
+      - name: Install to Staging
+        run: |
+          ./waf install --destdir=$GITHUB_WORKSPACE/_install
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ardour-cross-mingw64
+          path: _install
