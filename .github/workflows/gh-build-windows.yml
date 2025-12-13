@@ -69,15 +69,9 @@ jobs:
       - name: Configure
         shell: msys2 {0}
         run: |
-          # Force MinGW Compilers using absolute paths
-          export CC=/mingw64/bin/gcc
-          export CXX=/mingw64/bin/g++
-          export AR=/mingw64/bin/gcc-ar
-          export NM=/mingw64/bin/gcc-nm
-          export RANLIB=/mingw64/bin/gcc-ranlib
-          
-          # Use MinGW python explicitly
-          /mingw64/bin/python ./waf configure \
+          # The msys2 shell automatically puts /mingw64/bin in the PATH.
+          # We use the python installed in that environment.
+          python ./waf configure \
             --dist-target=mingw \
             --optimize \
             --ptformat \
@@ -89,12 +83,12 @@ jobs:
       - name: Build
         shell: msys2 {0}
         run: |
-          /mingw64/bin/python ./waf
+          python ./waf
 
       - name: Install
         shell: msys2 {0}
         run: |
-          /mingw64/bin/python ./waf install
+          python ./waf install
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
