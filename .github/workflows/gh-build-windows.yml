@@ -10,16 +10,12 @@ on:
 jobs:
   build-arch-mingw:
     runs-on: ubuntu-latest
-    # We use the official Arch image. 
-    # We MUST use a container because 'ubuntu-latest' lacks mingw-gtkmm binaries.
     container: archlinux:base-devel
 
     env:
-      # Standard Cross-Compile Flags
       CC: x86_64-w64-mingw32-gcc
       CXX: x86_64-w64-mingw32-g++
       WINDRES: x86_64-w64-mingw32-windres
-      # Pkg-config must point to the MinGWsys-root
       PKG_CONFIG_LIBDIR: /usr/x86_64-w64-mingw32/lib/pkgconfig:/usr/x86_64-w64-mingw32/share/pkgconfig
 
     steps:
@@ -28,26 +24,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Arch & Martchus Repo (Pre-built MinGW libs)
+      - name: Setup Martchus Repo & Keys
         run: |
-          # 1. Initialize Pacman
+          # 1. Initialize Pacman Keys
           pacman-key --init
           pacman-key --populate archlinux
           
-          # 2. Install tools to add the repo
-          pacman -Sy --noconfirm pacman-contrib curl
+          # 2. Receive and Sign the Martchus Key (B9E3...)
+          # We use keyserver.ubuntu.com as it is generally reliable in CI environments
+          pacman-key --keyserver keyserver.ubuntu.com --recv-keys B9E36A7275FC61B464B67907E06FE8F53CDC6A4C
+          pacman-key --lsign-key B9E36A7275FC61B464B67907E06FE8F53CDC6A4C
           
-          # 3. Add the 'Martchus' repo for pre-built mingw-w64 AUR packages
-          # This saves us from compiling GTK/Boost for 5 hours.
-          curl -O 'https://martchus.no-ip.biz/repo/arch/ownstuff/os/x86_64/ownstuff-keyring-20240125-1-any.pkg.tar.zst'
-          pacman -U --noconfirm ownstuff-keyring-*.pkg.tar.zst
-          
+          # 3. Add [ownstuff] repo to pacman.conf
+          # Using the mirror list you provided
           echo "" >> /etc/pacman.conf
           echo "[ownstuff]" >> /etc/pacman.conf
-          echo "Server = https://martchus.no-ip.biz/repo/arch/ownstuff/os/\$arch" >> /etc/pacman.conf
+          echo "Server = https://ftp.f3l.de/~martchus/\$repo/os/\$arch" >> /etc/pacman.conf
+          echo "Server = https://martchus.dyn.f3l.de/repo/arch/\$repo/os/\$arch" >> /etc/pacman.conf
           
           # 4. Update and Install Dependencies
-          pacman -Sy --noconfirm \
+          # We run -Syu to ensure base packages are synced with the new repo enabled
+          pacman -Syu --noconfirm \
             git python make diffutils \
             mingw-w64-gcc mingw-w64-pkg-config \
             mingw-w64-boost \
@@ -64,7 +61,6 @@ jobs:
 
       - name: Configure for MinGW
         run: |
-          # Arch's python is 'python', not 'python3'
           python ./waf configure \
             --dist-target=mingw \
             --optimize \
