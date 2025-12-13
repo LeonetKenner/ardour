@@ -11,11 +11,31 @@ jobs:
   build-win-native:
     runs-on: windows-latest
     
+    env:
+      MSYS2_CACHE_DIR: D:\a\_temp\msys64\var\cache\pacman\pkg
+      CCACHE_DIR: D:\a\_temp\.ccache
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # 1. Cache MSYS2 Packages (Saves download time)
+      - name: Cache MSYS2 Packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.MSYS2_CACHE_DIR }}
+          key: msys2-packages-${{ runner.os }}-${{ hashFiles('.github/workflows/*.yml') }}
+          restore-keys: msys2-packages-${{ runner.os }}-
+
+      # 2. Cache CCache (Saves compile time)
+      - name: Cache CCache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-${{ runner.os }}-
 
       - name: Setup MSYS2 & Install Deps
         uses: msys2/setup-msys2@v2
@@ -23,7 +43,7 @@ jobs:
           msystem: MINGW64
           update: true
           install: >-
-            git make pkg-config diffutils wget tar
+            git make pkg-config diffutils ccache
             mingw-w64-x86_64-python
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-gcc
@@ -67,44 +87,6 @@ jobs:
             mingw-w64-x86_64-readline
             mingw-w64-x86_64-libgnurx
 
-      - name: Build Raptor/Rasqal/Redland from Source
-        shell: msys2 {0}
-        run: |
-          mkdir -p build-deps
-          cd build-deps
-          
-          # Fix: CFLAGS="-Wno-error=int-conversion" tells GCC to stop treating 
-          # pointer-to-int conversion as a fatal error.
-          
-          echo "--- Building Raptor2 ---"
-          wget -q https://download.librdf.org/source/raptor2-2.0.15.tar.gz
-          tar -xf raptor2-2.0.15.tar.gz
-          cd raptor2-2.0.15
-          ./configure --prefix=/mingw64 --disable-static --enable-shared CFLAGS="-O2 -Wno-error=int-conversion"
-          make -j$(nproc)
-          make install
-          cd ..
-          
-          echo "--- Building Rasqal ---"
-          wget -q https://download.librdf.org/source/rasqal-0.9.33.tar.gz
-          tar -xf rasqal-0.9.33.tar.gz
-          cd rasqal-0.9.33
-          ./configure --prefix=/mingw64 --disable-static --enable-shared CFLAGS="-O2 -Wno-error=int-conversion"
-          make -j$(nproc)
-          make install
-          cd ..
-
-          echo "--- Building Redland ---"
-          wget -q https://download.librdf.org/source/redland-1.0.17.tar.gz
-          tar -xf redland-1.0.17.tar.gz
-          cd redland-1.0.17
-          ./configure --prefix=/mingw64 --disable-static --enable-shared --with-bdb=no CFLAGS="-O2 -Wno-error=int-conversion"
-          make -j$(nproc)
-          make install
-          cd ..
-          
-          echo "--- RDF Stack Installed ---"
-
       - name: Bruteforce Find GCC
         shell: msys2 {0}
         run: |
@@ -113,14 +95,14 @@ jobs:
           echo "REAL_GCC=$FOUND_GCC" >> $GITHUB_ENV
           echo "REAL_GXX=$FOUND_GXX" >> $GITHUB_ENV
 
-      - name: Configure (Force GCC & Link Flags)
+      - name: Configure
         shell: msys2 {0}
         run: |
           export CC="$REAL_GCC"
           export CXX="$REAL_GXX"
           
-          # FORCE LINKER to see missing libs + RDF stack
-          export LINKFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0 -lraptor2 -lrasqal -lredland"
+          # Force linker to see libraries that pkg-config sometimes misses
+          export LINKFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
           
           /mingw64/bin/python ./waf configure \
             --dist-target=mingw \
@@ -128,6 +110,7 @@ jobs:
             --ptformat \
             --no-dr-mingw \
             --cxx17 \
+            --ccache \
             --with-backends=jack,portaudio,dummy \
             --check-c-compiler=gcc \
             --check-cxx-compiler=g++ \
