@@ -26,6 +26,7 @@ jobs:
             git make pkg-config diffutils
             mingw-w64-x86_64-python
             mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-gcc
             mingw-w64-x86_64-autotools
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-libtool
@@ -66,29 +67,62 @@ jobs:
             mingw-w64-x86_64-readline
             mingw-w64-x86_64-libgnurx
 
-      - name: Configure
+      - name: Bruteforce Find GCC & Verify
         shell: msys2 {0}
         run: |
-          # The msys2 shell automatically puts /mingw64/bin in the PATH.
-          # We use the python installed in that environment.
-          python ./waf configure \
+          echo "--- Searching for GCC ---"
+          # Find gcc.exe inside the mingw64 folder
+          FOUND_GCC=$(find /mingw64 -name "gcc.exe" | head -n 1)
+          FOUND_GXX=$(find /mingw64 -name "g++.exe" | head -n 1)
+          
+          if [ -z "$FOUND_GCC" ]; then
+             echo "CRITICAL ERROR: gcc.exe not found in /mingw64!"
+             exit 1
+          fi
+          
+          echo "Found GCC at: $FOUND_GCC"
+          echo "Found G++ at: $FOUND_GXX"
+          
+          # Verify version
+          "$FOUND_GCC" --version
+          
+          # Export to GITHUB_ENV so next steps can use it (MSYS style)
+          echo "REAL_GCC=$FOUND_GCC" >> $GITHUB_ENV
+          echo "REAL_GXX=$FOUND_GXX" >> $GITHUB_ENV
+
+      - name: Configure (Force GCC)
+        shell: msys2 {0}
+        run: |
+          # We use the env vars found in the previous step
+          export CC="$REAL_GCC"
+          export CXX="$REAL_GXX"
+          
+          echo "Forcing CC to: $CC"
+          echo "Forcing CXX to: $CXX"
+          
+          # Using standard waf flag --check-c-compiler=gcc to attempt to override auto-detection
+          # Also passing CC/CXX inline to be safe.
+          
+          /mingw64/bin/python ./waf configure \
             --dist-target=mingw \
             --optimize \
             --ptformat \
             --no-dr-mingw \
             --cxx17 \
             --with-backends=jack,portaudio,dummy \
+            --check-c-compiler=gcc \
+            --check-cxx-compiler=g++ \
             --prefix=$GITHUB_WORKSPACE/_install
 
       - name: Build
         shell: msys2 {0}
         run: |
-          python ./waf
+          /mingw64/bin/python ./waf
 
       - name: Install
         shell: msys2 {0}
         run: |
-          python ./waf install
+          /mingw64/bin/python ./waf install
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
