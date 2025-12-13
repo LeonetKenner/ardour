@@ -90,19 +90,10 @@ jobs:
         run: |
           mkdir -p /usr/local/bin/ccache-wrappers
           CCACHE_BIN=$(which ccache)
-          # Copy ccache to look like gcc. It will now hunt for the real gcc in PATH.
           cp "$CCACHE_BIN" /usr/local/bin/ccache-wrappers/gcc.exe
           cp "$CCACHE_BIN" /usr/local/bin/ccache-wrappers/g++.exe
           cp "$CCACHE_BIN" /usr/local/bin/ccache-wrappers/cc.exe
           cp "$CCACHE_BIN" /usr/local/bin/ccache-wrappers/c++.exe
-          
-          # Verify Masquerade
-          # We export PATH temporarily here to test it
-          export PATH="/usr/local/bin/ccache-wrappers:/mingw64/bin:$PATH"
-          echo "--- Verifying Masquerade ---"
-          which gcc
-          gcc --version | head -n 1
-          # If this prints ccache version, it's working.
 
       - name: Configure
         shell: msys2 {0}
@@ -111,13 +102,10 @@ jobs:
           export CC=/usr/local/bin/ccache-wrappers/gcc.exe
           export CXX=/usr/local/bin/ccache-wrappers/g++.exe
           
-          # 2. FORCE LINKER FLAGS (LDFLAGS is standard, LINKFLAGS is Waf specific)
-          # We supply BOTH to ensure the linker finds the missing libraries.
-          export LDFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
-          export LINKFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
+          # 2. DO NOT Export LDFLAGS here.
+          # We want 'configure' to run clean so it finds system libs like 'setupapi'.
           
           # 3. Path Setup
-          # We append the real mingw64 bin so ccache can find the real compiler
           export PATH="/mingw64/bin:$PATH"
           
           /mingw64/bin/python ./waf configure \
@@ -135,10 +123,15 @@ jobs:
       - name: Build
         shell: msys2 {0}
         run: |
-          # Re-export path and compiler vars for the build step
+          # 1. Re-export Compiler
           export CC=/usr/local/bin/ccache-wrappers/gcc.exe
           export CXX=/usr/local/bin/ccache-wrappers/g++.exe
           export PATH="/mingw64/bin:$PATH"
+          
+          # 2. EXPORT FLAGS HERE (Only for the Build Step)
+          # This injects the missing libraries just for the linking stage
+          export LDFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
+          export LINKFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
           
           /mingw64/bin/python ./waf
 
