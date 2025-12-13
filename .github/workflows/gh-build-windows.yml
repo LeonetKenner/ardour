@@ -23,7 +23,8 @@ jobs:
           msystem: MINGW64
           update: true
           install: >-
-            git python3 make pkg-config diffutils
+            git make pkg-config diffutils
+            mingw-w64-x86_64-python
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-autotools
             mingw-w64-x86_64-cmake
@@ -68,14 +69,15 @@ jobs:
       - name: Configure
         shell: msys2 {0}
         run: |
-          # Explicitly force MinGW Compilers to stop MSVC auto-detection
-          export CC=gcc
-          export CXX=g++
-          export AR=gcc-ar
-          export NM=gcc-nm
-          export RANLIB=gcc-ranlib
+          # Force MinGW Compilers using absolute paths
+          export CC=/mingw64/bin/gcc
+          export CXX=/mingw64/bin/g++
+          export AR=/mingw64/bin/gcc-ar
+          export NM=/mingw64/bin/gcc-nm
+          export RANLIB=/mingw64/bin/gcc-ranlib
           
-          python ./waf configure \
+          # Use MinGW python explicitly
+          /mingw64/bin/python ./waf configure \
             --dist-target=mingw \
             --optimize \
             --ptformat \
@@ -87,12 +89,12 @@ jobs:
       - name: Build
         shell: msys2 {0}
         run: |
-          python ./waf
+          /mingw64/bin/python ./waf
 
       - name: Install
         shell: msys2 {0}
         run: |
-          python ./waf install
+          /mingw64/bin/python ./waf install
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
