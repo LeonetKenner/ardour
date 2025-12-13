@@ -1,4 +1,4 @@
-name: Cross-Compile Ardour (MinGW-w64 on Linux)
+name: Cross-Compile Ardour (Arch/MinGW)
 
 on:
   push:
@@ -8,15 +8,19 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-cross-mingw:
+  build-arch-mingw:
     runs-on: ubuntu-latest
-    container: fedora:39
+    # We use the official Arch image. 
+    # We MUST use a container because 'ubuntu-latest' lacks mingw-gtkmm binaries.
+    container: archlinux:base-devel
 
     env:
+      # Standard Cross-Compile Flags
       CC: x86_64-w64-mingw32-gcc
       CXX: x86_64-w64-mingw32-g++
       WINDRES: x86_64-w64-mingw32-windres
-      PKG_CONFIG_LIBDIR: /usr/x86_64-w64-mingw32/sys-root/mingw/lib/pkgconfig:/usr/x86_64-w64-mingw32/sys-root/mingw/share/pkgconfig
+      # Pkg-config must point to the MinGWsys-root
+      PKG_CONFIG_LIBDIR: /usr/x86_64-w64-mingw32/lib/pkgconfig:/usr/x86_64-w64-mingw32/share/pkgconfig
 
     steps:
       - name: Checkout code
@@ -24,28 +28,44 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install MinGW Dependencies (Fedora)
+      - name: Setup Arch & Martchus Repo (Pre-built MinGW libs)
         run: |
-          dnf -y update
-          dnf -y install \
-            git python3 make diffutils \
-            mingw64-gcc mingw64-gcc-c++ mingw64-pkg-config \
-            mingw64-boost \
-            mingw64-glib2 mingw64-glibmm24 \
-            mingw64-gtk3 mingw64-gtkmm30 \
-            mingw64-cairomm mingw64-pangomm \
-            mingw64-libsndfile mingw64-libarchive \
-            mingw64-libcurl mingw64-liblo \
-            mingw64-taglib mingw64-fftw \
-            mingw64-libxml2 mingw64-libsamplerate \
-            mingw64-jack-audio-connection-kit \
-            mingw64-lilv mingw64-serd mingw64-sord mingw64-sratom \
-            mingw64-dlfcn \
-            mingw64-portaudio 
+          # 1. Initialize Pacman
+          pacman-key --init
+          pacman-key --populate archlinux
+          
+          # 2. Install tools to add the repo
+          pacman -Sy --noconfirm pacman-contrib curl
+          
+          # 3. Add the 'Martchus' repo for pre-built mingw-w64 AUR packages
+          # This saves us from compiling GTK/Boost for 5 hours.
+          curl -O 'https://martchus.no-ip.biz/repo/arch/ownstuff/os/x86_64/ownstuff-keyring-20240125-1-any.pkg.tar.zst'
+          pacman -U --noconfirm ownstuff-keyring-*.pkg.tar.zst
+          
+          echo "" >> /etc/pacman.conf
+          echo "[ownstuff]" >> /etc/pacman.conf
+          echo "Server = https://martchus.no-ip.biz/repo/arch/ownstuff/os/\$arch" >> /etc/pacman.conf
+          
+          # 4. Update and Install Dependencies
+          pacman -Sy --noconfirm \
+            git python make diffutils \
+            mingw-w64-gcc mingw-w64-pkg-config \
+            mingw-w64-boost \
+            mingw-w64-glib2 mingw-w64-glibmm \
+            mingw-w64-gtk3 mingw-w64-gtkmm3 \
+            mingw-w64-cairomm mingw-w64-pangomm \
+            mingw-w64-libsndfile mingw-w64-libarchive \
+            mingw-w64-curl mingw-w64-liblo \
+            mingw-w64-taglib mingw-w64-fftw \
+            mingw-w64-libxml2 mingw-w64-libsamplerate \
+            mingw-w64-jack2 \
+            mingw-w64-lilv mingw-w64-serd mingw-w64-sord mingw-w64-sratom \
+            mingw-w64-portaudio
 
       - name: Configure for MinGW
         run: |
-          ./waf configure \
+          # Arch's python is 'python', not 'python3'
+          python ./waf configure \
             --dist-target=mingw \
             --optimize \
             --ptformat \
@@ -65,5 +85,5 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ardour-cross-mingw64
+          name: ardour-arch-mingw64
           path: _install
