@@ -21,7 +21,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 1. Cache MSYS2 Packages (Saves download time)
       - name: Cache MSYS2 Packages
         uses: actions/cache@v4
         with:
@@ -29,7 +28,6 @@ jobs:
           key: msys2-packages-${{ runner.os }}-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: msys2-packages-${{ runner.os }}-
 
-      # 2. Cache CCache (Saves compile time)
       - name: Cache CCache
         uses: actions/cache@v4
         with:
@@ -98,19 +96,23 @@ jobs:
       - name: Configure
         shell: msys2 {0}
         run: |
-          export CC="$REAL_GCC"
-          export CXX="$REAL_GXX"
+          # 1. WRAP COMPILER WITH CCACHE
+          # Instead of passing --ccache, we prepend it to the compiler command.
+          export CC="ccache $REAL_GCC"
+          export CXX="ccache $REAL_GXX"
           
-          # Force linker to see libraries that pkg-config sometimes misses
+          # 2. CRITICAL LINK FLAGS (Fixes missing symbols)
           export LINKFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
           
+          # 3. Configure
+          # Added --no-lrdf because we removed the Redland/Raptor libraries
           /mingw64/bin/python ./waf configure \
             --dist-target=mingw \
             --optimize \
             --ptformat \
             --no-dr-mingw \
             --cxx17 \
-            --ccache \
+            --no-lrdf \
             --with-backends=jack,portaudio,dummy \
             --check-c-compiler=gcc \
             --check-cxx-compiler=g++ \
