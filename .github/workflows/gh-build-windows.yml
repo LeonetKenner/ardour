@@ -1,4 +1,4 @@
-name: Cross-Compile Ardour (Arch/MinGW)
+name: Build Ardour (MinGW Native)
 
 on:
   push:
@@ -8,59 +8,52 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-arch-mingw:
-    runs-on: ubuntu-latest
-    container: archlinux:base-devel
-
-    env:
-      CC: x86_64-w64-mingw32-gcc
-      CXX: x86_64-w64-mingw32-g++
-      WINDRES: x86_64-w64-mingw32-windres
-      PKG_CONFIG_LIBDIR: /usr/x86_64-w64-mingw32/lib/pkgconfig:/usr/x86_64-w64-mingw32/share/pkgconfig
-
+  build-mingw-native:
+    runs-on: windows-latest
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Martchus Repo & Keys
-        run: |
-          # 1. Initialize Pacman Keys
-          pacman-key --init
-          pacman-key --populate archlinux
-          
-          # 2. Receive and Sign the Martchus Key (B9E3...)
-          # We use keyserver.ubuntu.com as it is generally reliable in CI environments
-          pacman-key --keyserver keyserver.ubuntu.com --recv-keys B9E36A7275FC61B464B67907E06FE8F53CDC6A4C
-          pacman-key --lsign-key B9E36A7275FC61B464B67907E06FE8F53CDC6A4C
-          
-          # 3. Add [ownstuff] repo to pacman.conf
-          # Using the mirror list you provided
-          echo "" >> /etc/pacman.conf
-          echo "[ownstuff]" >> /etc/pacman.conf
-          echo "Server = https://ftp.f3l.de/~martchus/\$repo/os/\$arch" >> /etc/pacman.conf
-          echo "Server = https://martchus.dyn.f3l.de/repo/arch/\$repo/os/\$arch" >> /etc/pacman.conf
-          
-          # 4. Update and Install Dependencies
-          # We run -Syu to ensure base packages are synced with the new repo enabled
-          pacman -Syu --noconfirm \
-            git python make diffutils \
-            mingw-w64-gcc mingw-w64-pkg-config \
-            mingw-w64-boost \
-            mingw-w64-glib2 mingw-w64-glibmm \
-            mingw-w64-gtk3 mingw-w64-gtkmm3 \
-            mingw-w64-cairomm mingw-w64-pangomm \
-            mingw-w64-libsndfile mingw-w64-libarchive \
-            mingw-w64-curl mingw-w64-liblo \
-            mingw-w64-taglib mingw-w64-fftw \
-            mingw-w64-libxml2 mingw-w64-libsamplerate \
-            mingw-w64-jack2 \
-            mingw-w64-lilv mingw-w64-serd mingw-w64-sord mingw-w64-sratom \
-            mingw-w64-portaudio
+      - name: Setup MSYS2 (Like apt for MinGW)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          # These are the pre-built binaries (the "PPA" equivalent)
+          install: >-
+            git make python3 diffutils
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-boost
+            mingw-w64-x86_64-glib2
+            mingw-w64-x86_64-glibmm
+            mingw-w64-x86_64-gtk3
+            mingw-w64-x86_64-gtkmm3
+            mingw-w64-x86_64-cairomm
+            mingw-w64-x86_64-pangomm
+            mingw-w64-x86_64-libsndfile
+            mingw-w64-x86_64-libarchive
+            mingw-w64-x86_64-liblo
+            mingw-w64-x86_64-taglib
+            mingw-w64-x86_64-fftw
+            mingw-w64-x86_64-libxml2
+            mingw-w64-x86_64-libsamplerate
+            mingw-w64-x86_64-jack2
+            mingw-w64-x86_64-lilv
+            mingw-w64-x86_64-serd
+            mingw-w64-x86_64-sord
+            mingw-w64-x86_64-sratom
+            mingw-w64-x86_64-portaudio
 
-      - name: Configure for MinGW
+      - name: Configure Build
+        shell: msys2 {0}
         run: |
+          # We are running natively on Windows now.
+          # --dist-target=mingw sets up the windows-specific flags automatically.
+          
           python ./waf configure \
             --dist-target=mingw \
             --optimize \
@@ -68,18 +61,20 @@ jobs:
             --no-dr-mingw \
             --cxx17 \
             --with-backends=jack,portaudio,dummy \
-            --prefix=/output
+            --prefix=$GITHUB_WORKSPACE/_install
 
       - name: Build Ardour
+        shell: msys2 {0}
         run: |
-          ./waf
+          python ./waf
 
-      - name: Install to Staging
+      - name: Install
+        shell: msys2 {0}
         run: |
-          ./waf install --destdir=$GITHUB_WORKSPACE/_install
+          python ./waf install
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ardour-arch-mingw64
+          name: ardour-win-x86_64
           path: _install
