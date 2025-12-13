@@ -59,9 +59,6 @@ jobs:
             mingw-w64-x86_64-sord
             mingw-w64-x86_64-sratom
             mingw-w64-x86_64-suil
-            mingw-w64-python-rdflib
-            mingw-w64-rasqal
-            mingw-w64-redland
             mingw-w64-x86_64-flac
             mingw-w64-x86_64-libvorbis
             mingw-w64-x86_64-libogg
