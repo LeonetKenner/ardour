@@ -70,15 +70,17 @@ jobs:
       - name: Build Raptor/Rasqal/Redland from Source
         shell: msys2 {0}
         run: |
-          # Create a temp build dir
           mkdir -p build-deps
           cd build-deps
+          
+          # Fix: CFLAGS="-Wno-error=int-conversion" tells GCC to stop treating 
+          # pointer-to-int conversion as a fatal error.
           
           echo "--- Building Raptor2 ---"
           wget -q https://download.librdf.org/source/raptor2-2.0.15.tar.gz
           tar -xf raptor2-2.0.15.tar.gz
           cd raptor2-2.0.15
-          ./configure --prefix=/mingw64 --disable-static --enable-shared
+          ./configure --prefix=/mingw64 --disable-static --enable-shared CFLAGS="-O2 -Wno-error=int-conversion"
           make -j$(nproc)
           make install
           cd ..
@@ -87,8 +89,7 @@ jobs:
           wget -q https://download.librdf.org/source/rasqal-0.9.33.tar.gz
           tar -xf rasqal-0.9.33.tar.gz
           cd rasqal-0.9.33
-          # Rasqal needs to know where raptor is (pkg-config handles this usually, but we force it)
-          ./configure --prefix=/mingw64 --disable-static --enable-shared
+          ./configure --prefix=/mingw64 --disable-static --enable-shared CFLAGS="-O2 -Wno-error=int-conversion"
           make -j$(nproc)
           make install
           cd ..
@@ -97,7 +98,7 @@ jobs:
           wget -q https://download.librdf.org/source/redland-1.0.17.tar.gz
           tar -xf redland-1.0.17.tar.gz
           cd redland-1.0.17
-          ./configure --prefix=/mingw64 --disable-static --enable-shared --with-bdb=no
+          ./configure --prefix=/mingw64 --disable-static --enable-shared --with-bdb=no CFLAGS="-O2 -Wno-error=int-conversion"
           make -j$(nproc)
           make install
           cd ..
@@ -118,7 +119,7 @@ jobs:
           export CC="$REAL_GCC"
           export CXX="$REAL_GXX"
           
-          # Force linker to see the new libraries we just compiled + the missing serd
+          # FORCE LINKER to see missing libs + RDF stack
           export LINKFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0 -lraptor2 -lrasqal -lredland"
           
           /mingw64/bin/python ./waf configure \
