@@ -1,4 +1,4 @@
-name: Build Ardour (Native Windows MinGW)
+name: Build Ardour (Native Windows MinGW + Ccache)
 
 on:
   push:
@@ -13,6 +13,7 @@ jobs:
     
     env:
       MSYS2_CACHE_DIR: D:\a\_temp\msys64\var\cache\pacman\pkg
+      CCACHE_DIR: D:\a\_temp\.ccache
 
     steps:
       - name: Checkout code
@@ -20,7 +21,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 1. Cache MSYS2 Packages (Saves download time)
       - name: Cache MSYS2 Packages
         uses: actions/cache@v4
         with:
@@ -28,13 +28,20 @@ jobs:
           key: msys2-packages-${{ runner.os }}-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: msys2-packages-${{ runner.os }}-
 
+      - name: Cache CCache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-${{ runner.os }}-
+
       - name: Setup MSYS2 & Install Deps
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
           install: >-
-            git make pkg-config diffutils
+            git make pkg-config diffutils ccache
             mingw-w64-x86_64-python
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-gcc
@@ -78,25 +85,41 @@ jobs:
             mingw-w64-x86_64-readline
             mingw-w64-x86_64-libgnurx
 
-      - name: Bruteforce Find GCC
+      - name: Setup Ccache Masquerade
         shell: msys2 {0}
         run: |
-          FOUND_GCC=$(find /mingw64 -name "gcc.exe" | head -n 1)
-          FOUND_GXX=$(find /mingw64 -name "g++.exe" | head -n 1)
-          echo "REAL_GCC=$FOUND_GCC" >> $GITHUB_ENV
-          echo "REAL_GXX=$FOUND_GXX" >> $GITHUB_ENV
+          mkdir -p /usr/local/bin/ccache-wrappers
+          CCACHE_BIN=$(which ccache)
+          # Copy ccache to look like gcc. It will now hunt for the real gcc in PATH.
+          cp "$CCACHE_BIN" /usr/local/bin/ccache-wrappers/gcc.exe
+          cp "$CCACHE_BIN" /usr/local/bin/ccache-wrappers/g++.exe
+          cp "$CCACHE_BIN" /usr/local/bin/ccache-wrappers/cc.exe
+          cp "$CCACHE_BIN" /usr/local/bin/ccache-wrappers/c++.exe
+          
+          # Verify Masquerade
+          # We export PATH temporarily here to test it
+          export PATH="/usr/local/bin/ccache-wrappers:/mingw64/bin:$PATH"
+          echo "--- Verifying Masquerade ---"
+          which gcc
+          gcc --version | head -n 1
+          # If this prints ccache version, it's working.
 
       - name: Configure
         shell: msys2 {0}
         run: |
-          # 1. Use EXACT PATHS (No ccache wrapper, it breaks Waf detection)
-          export CC="$REAL_GCC"
-          export CXX="$REAL_GXX"
+          # 1. Point CC/CXX to our FAKE wrappers
+          export CC=/usr/local/bin/ccache-wrappers/gcc.exe
+          export CXX=/usr/local/bin/ccache-wrappers/g++.exe
           
-          # 2. CRITICAL LINK FLAGS (Fixes missing symbols for fftw/serd)
+          # 2. FORCE LINKER FLAGS (LDFLAGS is standard, LINKFLAGS is Waf specific)
+          # We supply BOTH to ensure the linker finds the missing libraries.
+          export LDFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
           export LINKFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
           
-          # 3. Configure
+          # 3. Path Setup
+          # We append the real mingw64 bin so ccache can find the real compiler
+          export PATH="/mingw64/bin:$PATH"
+          
           /mingw64/bin/python ./waf configure \
             --dist-target=mingw \
             --optimize \
@@ -112,6 +135,11 @@ jobs:
       - name: Build
         shell: msys2 {0}
         run: |
+          # Re-export path and compiler vars for the build step
+          export CC=/usr/local/bin/ccache-wrappers/gcc.exe
+          export CXX=/usr/local/bin/ccache-wrappers/g++.exe
+          export PATH="/mingw64/bin:$PATH"
+          
           /mingw64/bin/python ./waf
 
       - name: Install
