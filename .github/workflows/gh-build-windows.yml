@@ -13,7 +13,6 @@ jobs:
     
     env:
       MSYS2_CACHE_DIR: D:\a\_temp\msys64\var\cache\pacman\pkg
-      CCACHE_DIR: D:\a\_temp\.ccache
 
     steps:
       - name: Checkout code
@@ -21,6 +20,7 @@ jobs:
         with:
           fetch-depth: 0
 
+      # 1. Cache MSYS2 Packages (Saves download time)
       - name: Cache MSYS2 Packages
         uses: actions/cache@v4
         with:
@@ -28,20 +28,13 @@ jobs:
           key: msys2-packages-${{ runner.os }}-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: msys2-packages-${{ runner.os }}-
 
-      - name: Cache CCache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-${{ github.sha }}
-          restore-keys: ccache-${{ runner.os }}-
-
       - name: Setup MSYS2 & Install Deps
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
           install: >-
-            git make pkg-config diffutils ccache
+            git make pkg-config diffutils
             mingw-w64-x86_64-python
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-gcc
@@ -96,16 +89,14 @@ jobs:
       - name: Configure
         shell: msys2 {0}
         run: |
-          # 1. WRAP COMPILER WITH CCACHE
-          # Instead of passing --ccache, we prepend it to the compiler command.
-          export CC="ccache $REAL_GCC"
-          export CXX="ccache $REAL_GXX"
+          # 1. Use EXACT PATHS (No ccache wrapper, it breaks Waf detection)
+          export CC="$REAL_GCC"
+          export CXX="$REAL_GXX"
           
-          # 2. CRITICAL LINK FLAGS (Fixes missing symbols)
+          # 2. CRITICAL LINK FLAGS (Fixes missing symbols for fftw/serd)
           export LINKFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
           
           # 3. Configure
-          # Added --no-lrdf because we removed the Redland/Raptor libraries
           /mingw64/bin/python ./waf configure \
             --dist-target=mingw \
             --optimize \
