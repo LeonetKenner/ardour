@@ -76,6 +76,7 @@ jobs:
             mingw-w64-x86_64-libogg
             mingw-w64-x86_64-readline
             mingw-w64-x86_64-libgnurx
+            mingw-w64-x86_64-fftw
 
       - name: Bruteforce Find GCC
         shell: msys2 {0}
