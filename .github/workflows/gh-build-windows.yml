@@ -157,15 +157,6 @@ jobs:
           /mingw64/bin/python ./waf
 
       # -----------------------------
-      # Install
-      # -----------------------------
-      - name: Install Ardour
-        shell: msys2 {0}
-        run: |
-          set -e
-          /mingw64/bin/python ./waf install
-
-      # -----------------------------
       # Package (official Ardour script)
       # -----------------------------
       - name: Package using official Ardour script
