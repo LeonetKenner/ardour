@@ -102,6 +102,8 @@ jobs:
             --cxx17 \
             --no-lrdf \
             --keepflags \
+            --check-c-compiler=gcc \
+            --check-cxx-compiler=g++ \
             --with-backends=jack,portaudio,dummy \
             --prefix=$GITHUB_WORKSPACE/_install
 
