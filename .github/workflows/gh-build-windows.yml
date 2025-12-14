@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
 
       # -----------------------------
-      # Setup MSYS2 + deps
+      # Setup MSYS2 + dependencies
       # -----------------------------
       - name: Setup MSYS2 & Install Dependencies
         uses: msys2/setup-msys2@v2
@@ -91,6 +91,17 @@ jobs:
             ccache-win-
 
       # -----------------------------
+      # Prepare ccache (MANDATORY)
+      # -----------------------------
+      - name: Prepare ccache
+        shell: msys2 {0}
+        run: |
+          set -e
+          mkdir -p "$GITHUB_WORKSPACE/.ccache"
+          ccache -M 2G
+          ccache -z
+
+      # -----------------------------
       # Bruteforce GCC discovery
       # -----------------------------
       - name: Bruteforce Find GCC
@@ -103,18 +114,18 @@ jobs:
           echo "REAL_GXX=$FOUND_GXX" >> $GITHUB_ENV
 
       # -----------------------------
-      # Configure Ardour (ccache via PATH)
+      # Configure Ardour (ccache FIXED)
       # -----------------------------
       - name: Configure Ardour
         shell: msys2 {0}
         run: |
           set -e
 
-          # Enable ccache correctly
+          # Force ccache even with absolute compiler paths
+          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
           export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
           export CCACHE_COMPRESS=1
-          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
-          export PATH="/mingw64/lib/ccache:/mingw64/bin:$PATH"
+          export CCACHE_PREFIX=ccache
 
           export LDFLAGS="-lfftw3f -lfftw3f_threads -lserd-0 -lsord-0 -lsratom-0"
           export CXXFLAGS="-Wno-maybe-uninitialized"
@@ -133,13 +144,16 @@ jobs:
             --prefix=$GITHUB_WORKSPACE/_install
 
       # -----------------------------
-      # Build
+      # Build (same ccache env)
       # -----------------------------
       - name: Build Ardour
         shell: msys2 {0}
         run: |
           set -e
-          export PATH="/mingw64/lib/ccache:/mingw64/bin:$PATH"
+          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
+          export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
+          export CCACHE_COMPRESS=1
+          export CCACHE_PREFIX=ccache
           /mingw64/bin/python ./waf
 
       # -----------------------------
@@ -152,7 +166,7 @@ jobs:
           /mingw64/bin/python ./waf install
 
       # -----------------------------
-      # Official Ardour Windows packaging
+      # Package (official Ardour script)
       # -----------------------------
       - name: Package using official Ardour script
         shell: msys2 {0}
@@ -172,6 +186,15 @@ jobs:
           name: Ardour-Windows-Nightly-Style
           path: |
             ardour-*-w64*
+
+      # -----------------------------
+      # Show ccache stats (proof)
+      # -----------------------------
+      - name: ccache stats
+        if: always()
+        shell: msys2 {0}
+        run: |
+          ccache -s
 
       # -----------------------------
       # Always save ccache (even on failure)
