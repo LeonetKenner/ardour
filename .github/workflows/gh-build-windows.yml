@@ -16,11 +16,17 @@ jobs:
       CCACHE_MAXSIZE: 2G
 
     steps:
+      # -----------------------------
+      # Checkout
+      # -----------------------------
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # -----------------------------
+      # Setup MSYS2 + deps
+      # -----------------------------
       - name: Setup MSYS2 & Install Dependencies
         uses: msys2/setup-msys2@v2
         with:
@@ -72,6 +78,9 @@ jobs:
             mingw-w64-x86_64-libgnurx
             mingw-w64-x86_64-ccache
 
+      # -----------------------------
+      # Restore ccache
+      # -----------------------------
       - name: Restore ccache
         uses: actions/cache@v4
         with:
@@ -81,6 +90,9 @@ jobs:
             ccache-win-${{ github.ref }}-
             ccache-win-
 
+      # -----------------------------
+      # Bruteforce GCC discovery
+      # -----------------------------
       - name: Bruteforce Find GCC
         shell: msys2 {0}
         run: |
@@ -90,14 +102,19 @@ jobs:
           echo "REAL_GCC=$FOUND_GCC" >> $GITHUB_ENV
           echo "REAL_GXX=$FOUND_GXX" >> $GITHUB_ENV
 
+      # -----------------------------
+      # Configure Ardour (ccache via PATH)
+      # -----------------------------
       - name: Configure Ardour
         shell: msys2 {0}
         run: |
           set -e
-          export CC="ccache $REAL_GCC"
-          export CXX="ccache $REAL_GXX"
+
+          # Enable ccache correctly
           export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
           export CCACHE_COMPRESS=1
+          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
+          export PATH="/mingw64/lib/ccache:/mingw64/bin:$PATH"
 
           export LDFLAGS="-lfftw3f -lfftw3f_threads -lserd-0 -lsord-0 -lsratom-0"
           export CXXFLAGS="-Wno-maybe-uninitialized"
@@ -110,23 +127,33 @@ jobs:
             --cxx17 \
             --no-lrdf \
             --keepflags \
+            --check-c-compiler=gcc \
+            --check-cxx-compiler=g++ \
             --with-backends=jack,portaudio,dummy \
             --prefix=$GITHUB_WORKSPACE/_install
 
+      # -----------------------------
+      # Build
+      # -----------------------------
       - name: Build Ardour
         shell: msys2 {0}
         run: |
           set -e
-          export CC="ccache $REAL_GCC"
-          export CXX="ccache $REAL_GXX"
+          export PATH="/mingw64/lib/ccache:/mingw64/bin:$PATH"
           /mingw64/bin/python ./waf
 
+      # -----------------------------
+      # Install
+      # -----------------------------
       - name: Install Ardour
         shell: msys2 {0}
         run: |
           set -e
           /mingw64/bin/python ./waf install
 
+      # -----------------------------
+      # Official Ardour Windows packaging
+      # -----------------------------
       - name: Package using official Ardour script
         shell: msys2 {0}
         run: |
@@ -136,6 +163,9 @@ jobs:
           export PREFIX="$GITHUB_WORKSPACE/_install"
           bash tools/x-win/package.sh
 
+      # -----------------------------
+      # Upload packaged result
+      # -----------------------------
       - name: Upload Windows Package
         uses: actions/upload-artifact@v4
         with:
