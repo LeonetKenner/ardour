@@ -1,4 +1,4 @@
-name: Build Ardour (Native Windows MinGW)
+name: Build Ardour (Native Windows MinGW – Portable)
 
 on:
   push:
@@ -10,9 +10,6 @@ on:
 jobs:
   build-win-native:
     runs-on: windows-latest
-    
-    env:
-      MSYS2_CACHE_DIR: D:\a\_temp\msys64\var\cache\pacman\pkg
 
     steps:
       - name: Checkout code
@@ -20,23 +17,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Cache MSYS2 Packages
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.MSYS2_CACHE_DIR }}
-          key: msys2-packages-${{ runner.os }}-${{ hashFiles('.github/workflows/*.yml') }}
-          restore-keys: msys2-packages-${{ runner.os }}-
-
-      - name: Setup MSYS2 & Install Deps
+      # -----------------------------
+      # Setup MSYS2 (let it cache itself)
+      # -----------------------------
+      - name: Setup MSYS2 & Install Dependencies
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
+          cache: true
           install: >-
             git make pkg-config diffutils
             mingw-w64-x86_64-python
             mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-gcc
             mingw-w64-x86_64-autotools
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-libtool
@@ -76,30 +69,21 @@ jobs:
             mingw-w64-x86_64-libogg
             mingw-w64-x86_64-readline
             mingw-w64-x86_64-libgnurx
-            mingw-w64-x86_64-fftw
 
-      - name: Bruteforce Find GCC
+      # -----------------------------
+      # Configure
+      # -----------------------------
+      - name: Configure Ardour
         shell: msys2 {0}
         run: |
-          FOUND_GCC=$(find /mingw64 -name "gcc.exe" | head -n 1)
-          FOUND_GXX=$(find /mingw64 -name "g++.exe" | head -n 1)
-          echo "REAL_GCC=$FOUND_GCC" >> $GITHUB_ENV
-          echo "REAL_GXX=$FOUND_GXX" >> $GITHUB_ENV
+          set -e
 
-      - name: Configure
-        shell: msys2 {0}
-        run: |
-          export CC="$REAL_GCC"
-          export CXX="$REAL_GXX"
-          
-          # 1. SET FLAGS IN ENVIRONMENT
-          # LDFLAGS is for the linker (fixes missing libraries)
+          export CC=gcc
+          export CXX=g++
+
           export LDFLAGS="-lfftw3f -lfftw3f_threads -lserd-0 -lsord-0 -lsratom-0"
-          # CXXFLAGS fixes the warning treated as error
           export CXXFLAGS="-Wno-maybe-uninitialized"
-          
-          # 2. RUN WAF WITH --keepflags
-          # This tells Waf: "Don't ignore the variables I just exported!"
+
           /mingw64/bin/python ./waf configure \
             --dist-target=mingw \
             --optimize \
@@ -109,29 +93,99 @@ jobs:
             --no-lrdf \
             --keepflags \
             --with-backends=jack,portaudio,dummy \
-            --check-c-compiler=gcc \
-            --check-cxx-compiler=g++ \
             --prefix=$GITHUB_WORKSPACE/_install
 
-      - name: Build
+      # -----------------------------
+      # Build
+      # -----------------------------
+      - name: Build Ardour
         shell: msys2 {0}
         run: |
-          export CC="$REAL_GCC"
-          export CXX="$REAL_GXX"
-          
-          # Re-export flags for the build step
-          export LDFLAGS="-lfftw3f -lfftw3f_threads -lserd-0 -lsord-0 -lsratom-0"
-          export CXXFLAGS="-Wno-maybe-uninitialized"
-          
+          set -e
           /mingw64/bin/python ./waf
 
-      - name: Install
+      # -----------------------------
+      # Install
+      # -----------------------------
+      - name: Install Ardour
         shell: msys2 {0}
         run: |
+          set -e
           /mingw64/bin/python ./waf install
 
-      - name: Upload Artifacts
+      # -----------------------------
+      # Bundle required DLLs
+      # -----------------------------
+      - name: Bundle MinGW runtime DLLs
+        shell: msys2 {0}
+        run: |
+          set -e
+
+          BIN="$GITHUB_WORKSPACE/_install/bin"
+          MINGW="/mingw64/bin"
+
+          echo "Bundling DLLs..."
+
+          ldd "$BIN/ardour.exe" \
+            | grep mingw64 \
+            | awk '{print $3}' \
+            | while read dll; do
+                cp -u "$dll" "$BIN/"
+              done
+
+          cp -u "$MINGW"/libgcc_s_seh-1.dll "$BIN/" || true
+          cp -u "$MINGW"/libstdc++-6.dll "$BIN/" || true
+          cp -u "$MINGW"/libwinpthread-1.dll "$BIN/" || true
+
+      # -----------------------------
+      # Strip binaries
+      # -----------------------------
+      - name: Strip binaries
+        shell: msys2 {0}
+        run: |
+          strip _install/bin/*.exe || true
+          strip _install/bin/*.dll || true
+
+      # -----------------------------
+      # Create portable layout
+      # -----------------------------
+      - name: Create portable layout
+        shell: msys2 {0}
+        run: |
+          set -e
+
+          PORTABLE="$GITHUB_WORKSPACE/Ardour-Portable"
+          INSTALL="$GITHUB_WORKSPACE/_install"
+
+          rm -rf "$PORTABLE"
+          mkdir -p "$PORTABLE"
+
+          mv "$INSTALL/bin/"* "$PORTABLE/"
+          mv "$INSTALL/lib" "$PORTABLE/"
+          mv "$INSTALL/share" "$PORTABLE/"
+
+          if [ -d "$INSTALL/etc" ]; then
+            mv "$INSTALL/etc" "$PORTABLE/"
+          fi
+
+          rm -rf "$INSTALL"
+
+          cat > "$PORTABLE/README.txt" <<EOF
+          Ardour Portable (Windows)
+
+            - Native MinGW-w64 build
+            - Fully portable, no installer
+            - Run Ardour.exe to start
+            - Do not remove lib/, share/, or etc/
+
+            Built via GitHub Actions
+          EOF
+
+      # -----------------------------
+      # Upload artifact
+      # -----------------------------
+      - name: Upload Portable Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ardour-win-x86_64
-          path: _install
+          name: Ardour-Portable-Windows-x86_64
+          path: Ardour-Portable
