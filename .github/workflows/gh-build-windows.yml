@@ -12,7 +12,6 @@ jobs:
     runs-on: windows-latest
 
     env:
-      # ENFORCE x86_64: MINGW64 environment ensures 64-bit toolchain and libs.
       MSYSTEM: MINGW64
       MSYS2_PATH_TYPE: inherit
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -25,9 +24,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # -----------------------------
-      # Setup MSYS2 (Enforcing 64-bit)
-      # -----------------------------
       - name: Setup MSYS2 & Install Dependencies
         uses: msys2/setup-msys2@v2
         with:
@@ -89,7 +85,6 @@ jobs:
             echo "ERROR: Compiler is NOT x86_64!"
             exit 1
           fi
-          echo "Confirmed: x86_64 architecture."
 
       - name: Restore ccache
         uses: actions/cache@v4
@@ -110,8 +105,26 @@ jobs:
         shell: msys2 {0}
         run: |
           set -e
-          export CC="ccache gcc"
-          export CXX="ccache g++"
+          
+          # --- CCache Masquerade Setup ---
+          # 1. Create a local bin directory
+          mkdir -p "$GITHUB_WORKSPACE/ccache-wrappers"
+          
+          # 2. Copy ccache.exe to 'gcc.exe' and 'g++.exe'
+          #    (We use copy because windows symlinks can be tricky in some envs)
+          cp /mingw64/bin/ccache.exe "$GITHUB_WORKSPACE/ccache-wrappers/gcc.exe"
+          cp /mingw64/bin/ccache.exe "$GITHUB_WORKSPACE/ccache-wrappers/g++.exe"
+          
+          # 3. Add wrappers to the FRONT of the PATH
+          export PATH="$GITHUB_WORKSPACE/ccache-wrappers:$PATH"
+          
+          # 4. Tell ccache where the REAL compilers are (to avoid recursion loops)
+          export CCACHE_PATH="/mingw64/bin"
+          
+          # --- Standard Build Flags ---
+          # NOTE: CC/CXX are NOT set to "ccache gcc". 
+          # Waf will find 'gcc' in our wrapper dir (which is ccache), and work happily.
+          
           export CFLAGS="-mstackrealign"
           export CXXFLAGS="-mstackrealign -Wno-maybe-uninitialized"
           export LDFLAGS="-luuid -lole32 -lfftw3f -lfftw3f_threads -lserd-0 -lsord-0 -lsratom-0"
@@ -129,23 +142,28 @@ jobs:
 
       - name: Build
         shell: msys2 {0}
-        run: /mingw64/bin/python ./waf
+        run: |
+          # Re-apply ccache masking for the build step
+          export PATH="$GITHUB_WORKSPACE/ccache-wrappers:$PATH"
+          export CCACHE_PATH="/mingw64/bin"
+          
+          /mingw64/bin/python ./waf
 
-      # -----------------------------
-      # Install (MANDATORY for package.sh)
-      # -----------------------------
       - name: Install to Prefix
         shell: msys2 {0}
-        run: /mingw64/bin/python ./waf install
+        run: |
+          # Re-apply ccache masking (though less critical for install)
+          export PATH="$GITHUB_WORKSPACE/ccache-wrappers:$PATH"
+          export CCACHE_PATH="/mingw64/bin"
+          
+          /mingw64/bin/python ./waf install
 
       - name: Package
         shell: msys2 {0}
         run: |
           set -e
           cd "$GITHUB_WORKSPACE"
-          # Define the prefix where 'waf install' put the files
           export PREFIX="$GITHUB_WORKSPACE/_install"
-          # Run the packaging script
           bash tools/x-win/package.sh
 
       - name: Upload Windows Package
