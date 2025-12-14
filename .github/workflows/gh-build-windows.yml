@@ -94,7 +94,7 @@ jobs:
           
           # 1. SET FLAGS IN ENVIRONMENT
           # LDFLAGS is for the linker (fixes missing libraries)
-          export LDFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
+          export LDFLAGS="-lfftw3f -lfftw3f_threads -lserd-0 -lsord-0 -lsratom-0"
           # CXXFLAGS fixes the warning treated as error
           export CXXFLAGS="-Wno-maybe-uninitialized"
           
@@ -120,7 +120,7 @@ jobs:
           export CXX="$REAL_GXX"
           
           # Re-export flags for the build step
-          export LDFLAGS="-lfftw3f -lserd-0 -lsord-0 -lsratom-0"
+          export LDFLAGS="-lfftw3f -lfftw3f_threads -lserd-0 -lsord-0 -lsratom-0"
           export CXXFLAGS="-Wno-maybe-uninitialized"
           
           /mingw64/bin/python ./waf
