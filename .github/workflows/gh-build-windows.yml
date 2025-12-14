@@ -18,7 +18,7 @@ jobs:
           fetch-depth: 0
 
       # -----------------------------
-      # Setup MSYS2 (let it cache itself)
+      # Setup MSYS2 (with internal cache)
       # -----------------------------
       - name: Setup MSYS2 & Install Dependencies
         uses: msys2/setup-msys2@v2
@@ -71,16 +71,26 @@ jobs:
             mingw-w64-x86_64-libgnurx
 
       # -----------------------------
+      # Bruteforce GCC discovery
+      # -----------------------------
+      - name: Bruteforce Find GCC
+        shell: msys2 {0}
+        run: |
+          set -e
+          FOUND_GCC=$(find /mingw64 -name "gcc.exe" | head -n 1)
+          FOUND_GXX=$(find /mingw64 -name "g++.exe" | head -n 1)
+          echo "REAL_GCC=$FOUND_GCC" >> $GITHUB_ENV
+          echo "REAL_GXX=$FOUND_GXX" >> $GITHUB_ENV
+
+      # -----------------------------
       # Configure
       # -----------------------------
       - name: Configure Ardour
         shell: msys2 {0}
         run: |
           set -e
-
-          export CC=gcc
-          export CXX=g++
-
+          export CC="$REAL_GCC"
+          export CXX="$REAL_GXX"
           export LDFLAGS="-lfftw3f -lfftw3f_threads -lserd-0 -lsord-0 -lsratom-0"
           export CXXFLAGS="-Wno-maybe-uninitialized"
 
@@ -102,6 +112,8 @@ jobs:
         shell: msys2 {0}
         run: |
           set -e
+          export CC="$REAL_GCC"
+          export CXX="$REAL_GXX"
           /mingw64/bin/python ./waf
 
       # -----------------------------
@@ -120,11 +132,8 @@ jobs:
         shell: msys2 {0}
         run: |
           set -e
-
           BIN="$GITHUB_WORKSPACE/_install/bin"
           MINGW="/mingw64/bin"
-
-          echo "Bundling DLLs..."
 
           ldd "$BIN/ardour.exe" \
             | grep mingw64 \
@@ -153,7 +162,6 @@ jobs:
         shell: msys2 {0}
         run: |
           set -e
-
           PORTABLE="$GITHUB_WORKSPACE/Ardour-Portable"
           INSTALL="$GITHUB_WORKSPACE/_install"
 
@@ -169,17 +177,6 @@ jobs:
           fi
 
           rm -rf "$INSTALL"
-
-          cat > "$PORTABLE/README.txt" <<EOF
-          Ardour Portable (Windows)
-
-            - Native MinGW-w64 build
-            - Fully portable, no installer
-            - Run Ardour.exe to start
-            - Do not remove lib/, share/, or etc/
-
-            Built via GitHub Actions
-          EOF
 
       # -----------------------------
       # Upload artifact
