@@ -135,6 +135,8 @@ jobs:
             --ptformat \
             --no-dr-mingw \
             --cxx17 \
+            --check-c-compiler=gcc \
+            --check-cxx-compiler=g++ \
             --no-lrdf \
             --arch="-mstackrealign" \
             --with-backends=jack,portaudio,dummy \
