@@ -1,4 +1,4 @@
-name: Build Ardour (Native Windows MinGW – Portable)
+name: Build Ardour (Native Windows MinGW – Nightly Style)
 
 on:
   push:
@@ -11,15 +11,16 @@ jobs:
   build-win-native:
     runs-on: windows-latest
 
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # -----------------------------
-      # Setup MSYS2 (with internal cache)
-      # -----------------------------
       - name: Setup MSYS2 & Install Dependencies
         uses: msys2/setup-msys2@v2
         with:
@@ -27,7 +28,7 @@ jobs:
           update: true
           cache: true
           install: >-
-            git make pkg-config diffutils
+            git make pkg-config diffutils zip
             mingw-w64-x86_64-python
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-autotools
@@ -69,10 +70,17 @@ jobs:
             mingw-w64-x86_64-libogg
             mingw-w64-x86_64-readline
             mingw-w64-x86_64-libgnurx
+            mingw-w64-x86_64-ccache
 
-      # -----------------------------
-      # Bruteforce GCC discovery
-      # -----------------------------
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-win-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            ccache-win-${{ github.ref }}-
+            ccache-win-
+
       - name: Bruteforce Find GCC
         shell: msys2 {0}
         run: |
@@ -82,15 +90,15 @@ jobs:
           echo "REAL_GCC=$FOUND_GCC" >> $GITHUB_ENV
           echo "REAL_GXX=$FOUND_GXX" >> $GITHUB_ENV
 
-      # -----------------------------
-      # Configure
-      # -----------------------------
       - name: Configure Ardour
         shell: msys2 {0}
         run: |
           set -e
-          export CC="$REAL_GCC"
-          export CXX="$REAL_GXX"
+          export CC="ccache $REAL_GCC"
+          export CXX="ccache $REAL_GXX"
+          export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
+          export CCACHE_COMPRESS=1
+
           export LDFLAGS="-lfftw3f -lfftw3f_threads -lserd-0 -lsord-0 -lsratom-0"
           export CXXFLAGS="-Wno-maybe-uninitialized"
 
@@ -102,89 +110,45 @@ jobs:
             --cxx17 \
             --no-lrdf \
             --keepflags \
-            --check-c-compiler=gcc \
-            --check-cxx-compiler=g++ \
             --with-backends=jack,portaudio,dummy \
             --prefix=$GITHUB_WORKSPACE/_install
 
-      # -----------------------------
-      # Build
-      # -----------------------------
       - name: Build Ardour
         shell: msys2 {0}
         run: |
           set -e
-          export CC="$REAL_GCC"
-          export CXX="$REAL_GXX"
+          export CC="ccache $REAL_GCC"
+          export CXX="ccache $REAL_GXX"
           /mingw64/bin/python ./waf
 
-      # -----------------------------
-      # Install
-      # -----------------------------
       - name: Install Ardour
         shell: msys2 {0}
         run: |
           set -e
           /mingw64/bin/python ./waf install
 
-      # -----------------------------
-      # Bundle required DLLs
-      # -----------------------------
-      - name: Bundle MinGW runtime DLLs
+      - name: Package using official Ardour script
         shell: msys2 {0}
         run: |
           set -e
-          BIN="$GITHUB_WORKSPACE/_install/bin"
-          MINGW="/mingw64/bin"
+          cd "$GITHUB_WORKSPACE"
+          export MSYSTEM=MINGW64
+          export PREFIX="$GITHUB_WORKSPACE/_install"
+          bash tools/x-win/package.sh
 
-          ldd "$BIN/ardour.exe" \
-            | grep mingw64 \
-            | awk '{print $3}' \
-            | while read dll; do
-                cp -u "$dll" "$BIN/"
-              done
-
-          cp -u "$MINGW"/libgcc_s_seh-1.dll "$BIN/" || true
-          cp -u "$MINGW"/libstdc++-6.dll "$BIN/" || true
-          cp -u "$MINGW"/libwinpthread-1.dll "$BIN/" || true
-
-      # -----------------------------
-      # Strip binaries
-      # -----------------------------
-      - name: Strip binaries
-        shell: msys2 {0}
-        run: |
-          strip _install/bin/*.exe || true
-          strip _install/bin/*.dll || true
-
-      # -----------------------------
-      # Create portable layout
-      # -----------------------------
-      - name: Create portable layout
-        shell: msys2 {0}
-        run: |
-          set -e
-          PORTABLE="$GITHUB_WORKSPACE/Ardour-Portable"
-          INSTALL="$GITHUB_WORKSPACE/_install"
-
-          rm -rf "$PORTABLE"
-          mkdir -p "$PORTABLE"
-
-          mv "$INSTALL/bin/"* "$PORTABLE/"
-          mv "$INSTALL/lib" "$PORTABLE/"
-          mv "$INSTALL/share" "$PORTABLE/"
-
-          if [ -d "$INSTALL/etc" ]; then
-            mv "$INSTALL/etc" "$PORTABLE/"
-          fi
-
-          rm -rf "$INSTALL"
-
-      # -----------------------------
-      # Upload artifact
-      # -----------------------------
-      - name: Upload Portable Artifact
+      - name: Upload Windows Package
         uses: actions/upload-artifact@v4
         with:
-          name: Ardour-Portable-Windows-x86_64
-          path: Ardour-Portable
+          name: Ardour-Windows-Nightly-Style
+          path: |
+            ardour-*-w64*
+
+      # -----------------------------
+      # Always save ccache (even on failure)
+      # -----------------------------
+      - name: Save ccache (always)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ccache-win-${{ github.ref }}-${{ github.sha }}
