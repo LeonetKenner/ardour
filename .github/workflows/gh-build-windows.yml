@@ -1,4 +1,4 @@
-name: Build Ardour (Native Windows MinGW – Nightly Style)
+name: Build Ardour (Native Windows MinGW – Nightly)
 
 on:
   push:
@@ -12,20 +12,21 @@ jobs:
     runs-on: windows-latest
 
     env:
+      # ENFORCE x86_64: MINGW64 environment ensures 64-bit toolchain and libs.
+      MSYSTEM: MINGW64
+      MSYS2_PATH_TYPE: inherit
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 2G
+      CCACHE_COMPRESS: 1
 
     steps:
-      # -----------------------------
-      # Checkout
-      # -----------------------------
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       # -----------------------------
-      # Setup MSYS2 + dependencies
+      # Setup MSYS2 (Enforcing 64-bit)
       # -----------------------------
       - name: Setup MSYS2 & Install Dependencies
         uses: msys2/setup-msys2@v2
@@ -34,11 +35,12 @@ jobs:
           update: true
           cache: true
           install: >-
-            git make pkg-config diffutils zip
+            git make pkg-config diffutils zip unzip
             mingw-w64-x86_64-python
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-autotools
             mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-nsis
             mingw-w64-x86_64-libtool
             mingw-w64-x86_64-itstool
             mingw-w64-x86_64-gettext
@@ -78,9 +80,17 @@ jobs:
             mingw-w64-x86_64-libgnurx
             mingw-w64-x86_64-ccache
 
-      # -----------------------------
-      # Restore ccache
-      # -----------------------------
+      - name: Verify Architecture (x86_64)
+        shell: msys2 {0}
+        run: |
+          echo "Checking compiler architecture..."
+          gcc -v
+          if [[ $(gcc -dumpmachine) != *"x86_64"* ]]; then
+            echo "ERROR: Compiler is NOT x86_64!"
+            exit 1
+          fi
+          echo "Confirmed: x86_64 architecture."
+
       - name: Restore ccache
         uses: actions/cache@v4
         with:
@@ -90,45 +100,21 @@ jobs:
             ccache-win-${{ github.ref }}-
             ccache-win-
 
-      # -----------------------------
-      # Prepare ccache (MANDATORY)
-      # -----------------------------
       - name: Prepare ccache
         shell: msys2 {0}
         run: |
-          set -e
-          mkdir -p "$GITHUB_WORKSPACE/.ccache"
-          ccache -M 2G
+          mkdir -p "$CCACHE_DIR"
           ccache -z
 
-      # -----------------------------
-      # Bruteforce GCC discovery
-      # -----------------------------
-      - name: Bruteforce Find GCC
-        shell: msys2 {0}
-        run: |
-          set -e
-          FOUND_GCC=$(find /mingw64 -name "gcc.exe" | head -n 1)
-          FOUND_GXX=$(find /mingw64 -name "g++.exe" | head -n 1)
-          echo "REAL_GCC=$FOUND_GCC" >> $GITHUB_ENV
-          echo "REAL_GXX=$FOUND_GXX" >> $GITHUB_ENV
-
-      # -----------------------------
-      # Configure Ardour (ccache FIXED)
-      # -----------------------------
       - name: Configure Ardour
         shell: msys2 {0}
         run: |
           set -e
-
-          # Force ccache even with absolute compiler paths
-          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
-          export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
-          export CCACHE_COMPRESS=1
-          export CCACHE_PREFIX=ccache
-
-          export LDFLAGS="-lfftw3f -lfftw3f_threads -lserd-0 -lsord-0 -lsratom-0"
-          export CXXFLAGS="-Wno-maybe-uninitialized"
+          export CC="ccache gcc"
+          export CXX="ccache g++"
+          export CFLAGS="-mstackrealign"
+          export CXXFLAGS="-mstackrealign -Wno-maybe-uninitialized"
+          export LDFLAGS="-luuid -lole32 -lfftw3f -lfftw3f_threads -lserd-0 -lsord-0 -lsratom-0"
 
           /mingw64/bin/python ./waf configure \
             --dist-target=mingw \
@@ -137,60 +123,45 @@ jobs:
             --no-dr-mingw \
             --cxx17 \
             --no-lrdf \
-            --keepflags \
-            --check-c-compiler=gcc \
-            --check-cxx-compiler=g++ \
+            --arch="-mstackrealign" \
             --with-backends=jack,portaudio,dummy \
-            --prefix=$GITHUB_WORKSPACE/_install
+            --prefix="$GITHUB_WORKSPACE/_install"
 
-      # -----------------------------
-      # Build (same ccache env)
-      # -----------------------------
-      - name: Build Ardour
+      - name: Build
         shell: msys2 {0}
-        run: |
-          set -e
-          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
-          export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
-          export CCACHE_COMPRESS=1
-          export CCACHE_PREFIX=ccache
-          /mingw64/bin/python ./waf
+        run: /mingw64/bin/python ./waf
 
       # -----------------------------
-      # Package (official Ardour script)
+      # Install (MANDATORY for package.sh)
       # -----------------------------
-      - name: Package using official Ardour script
+      - name: Install to Prefix
+        shell: msys2 {0}
+        run: /mingw64/bin/python ./waf install
+
+      - name: Package
         shell: msys2 {0}
         run: |
           set -e
           cd "$GITHUB_WORKSPACE"
-          export MSYSTEM=MINGW64
+          # Define the prefix where 'waf install' put the files
           export PREFIX="$GITHUB_WORKSPACE/_install"
+          # Run the packaging script
           bash tools/x-win/package.sh
 
-      # -----------------------------
-      # Upload packaged result
-      # -----------------------------
       - name: Upload Windows Package
         uses: actions/upload-artifact@v4
         with:
-          name: Ardour-Windows-Nightly-Style
+          name: Ardour-Windows-Nightly
           path: |
+            Ardour-*-win*.exe
             ardour-*-w64*
 
-      # -----------------------------
-      # Show ccache stats (proof)
-      # -----------------------------
       - name: ccache stats
         if: always()
         shell: msys2 {0}
-        run: |
-          ccache -s
+        run: ccache -s
 
-      # -----------------------------
-      # Always save ccache (even on failure)
-      # -----------------------------
-      - name: Save ccache (always)
+      - name: Save ccache
         if: always()
         uses: actions/cache/save@v4
         with:
