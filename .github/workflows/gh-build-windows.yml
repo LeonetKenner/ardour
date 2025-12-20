@@ -14,9 +14,6 @@ jobs:
     env:
       MSYSTEM: MINGW64
       MSYS2_PATH_TYPE: inherit
-      CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_MAXSIZE: 2G
-      CCACHE_COMPRESS: 1
 
     steps:
       - name: Checkout code
@@ -74,7 +71,6 @@ jobs:
             mingw-w64-x86_64-libogg
             mingw-w64-x86_64-readline
             mingw-w64-x86_64-libgnurx
-            mingw-w64-x86_64-ccache
 
       - name: Verify Architecture (x86_64)
         shell: msys2 {0}
@@ -86,45 +82,16 @@ jobs:
             exit 1
           fi
 
-      - name: Restore ccache
-        uses: actions/cache@v4
-        with:
-          path: .ccache
-          key: ccache-win-${{ github.ref }}-${{ github.sha }}
-          restore-keys: |
-            ccache-win-${{ github.ref }}-
-            ccache-win-
-
-      - name: Prepare ccache
+      - name: Clean waf cache
         shell: msys2 {0}
         run: |
-          mkdir -p "$CCACHE_DIR"
-          ccache -z
+          rm -rf .waf-*
 
       - name: Configure Ardour
         shell: msys2 {0}
         run: |
           set -e
-          
-          # --- CCache Masquerade Setup ---
-          # 1. Create a local bin directory
-          mkdir -p "$GITHUB_WORKSPACE/ccache-wrappers"
-          
-          # 2. Copy ccache.exe to 'gcc.exe' and 'g++.exe'
-          #    (We use copy because windows symlinks can be tricky in some envs)
-          cp /mingw64/bin/ccache.exe "$GITHUB_WORKSPACE/ccache-wrappers/gcc.exe"
-          cp /mingw64/bin/ccache.exe "$GITHUB_WORKSPACE/ccache-wrappers/g++.exe"
-          
-          # 3. Add wrappers to the FRONT of the PATH
-          export PATH="$GITHUB_WORKSPACE/ccache-wrappers:$PATH"
-          
-          # 4. Tell ccache where the REAL compilers are (to avoid recursion loops)
-          export CCACHE_PATH="/mingw64/bin"
-          
-          # --- Standard Build Flags ---
-          # NOTE: CC/CXX are NOT set to "ccache gcc". 
-          # Waf will find 'gcc' in our wrapper dir (which is ccache), and work happily.
-          
+
           export CFLAGS="-mstackrealign"
           export CXXFLAGS="-mstackrealign -Wno-maybe-uninitialized"
           export LDFLAGS="-luuid -lole32 -lfftw3f -lfftw3f_threads -lserd-0 -lsord-0 -lsratom-0"
@@ -145,19 +112,11 @@ jobs:
       - name: Build
         shell: msys2 {0}
         run: |
-          # Re-apply ccache masking for the build step
-          export PATH="$GITHUB_WORKSPACE/ccache-wrappers:$PATH"
-          export CCACHE_PATH="/mingw64/bin"
-          
           /mingw64/bin/python ./waf
 
       - name: Install to Prefix
         shell: msys2 {0}
         run: |
-          # Re-apply ccache masking (though less critical for install)
-          export PATH="$GITHUB_WORKSPACE/ccache-wrappers:$PATH"
-          export CCACHE_PATH="/mingw64/bin"
-          
           /mingw64/bin/python ./waf install
 
       - name: Package
@@ -175,15 +134,3 @@ jobs:
           path: |
             Ardour-*-win*.exe
             ardour-*-w64*
-
-      - name: ccache stats
-        if: always()
-        shell: msys2 {0}
-        run: ccache -s
-
-      - name: Save ccache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: .ccache
-          key: ccache-win-${{ github.ref }}-${{ github.sha }}
