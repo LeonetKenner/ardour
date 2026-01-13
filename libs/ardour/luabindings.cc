@@ -289,7 +289,6 @@ CLASSKEYS(ARDOUR::LuaTableRef);
 CLASSKEYS(ARDOUR::MidiModel::NoteDiffCommand);
 CLASSKEYS(ARDOUR::MidiModel::SysExDiffCommand);
 CLASSKEYS(ARDOUR::MonitorProcessor);
-CLASSKEYS(ARDOUR::RouteGroup);
 CLASSKEYS(ARDOUR::ParameterDescriptor);
 CLASSKEYS(ARDOUR::PeakMeter);
 CLASSKEYS(ARDOUR::PluginInfo);
@@ -336,6 +335,7 @@ CLASSKEYS(std::list<std::shared_ptr<ARDOUR::PluginInfo> >); // PluginInfoList
 CLASSKEYS(std::list<std::shared_ptr<ARDOUR::Port> >);
 CLASSKEYS(std::list<std::shared_ptr<ARDOUR::Region> >);
 CLASSKEYS(std::list<std::shared_ptr<ARDOUR::Route> >);
+CLASSKEYS(std::list<std::shared_ptr<ARDOUR::RouteGroup> >);
 CLASSKEYS(std::list<std::shared_ptr<ARDOUR::Stripable> >);
 
 CLASSKEYS(std::shared_ptr<std::list<std::shared_ptr<ARDOUR::Route> > >);
@@ -357,6 +357,7 @@ CLASSKEYS(std::shared_ptr<ARDOUR::PluginInfo>);
 CLASSKEYS(std::shared_ptr<ARDOUR::PluginInsert>);
 CLASSKEYS(std::shared_ptr<ARDOUR::RegionFxPlugin>);
 CLASSKEYS(std::shared_ptr<ARDOUR::Route>);
+CLASSKEYS(std::shared_ptr<ARDOUR::RouteGroup>);
 CLASSKEYS(std::shared_ptr<ARDOUR::Playlist>);
 CLASSKEYS(std::shared_ptr<ARDOUR::Processor>);
 CLASSKEYS(std::shared_ptr<ARDOUR::AudioReadable>);
@@ -818,7 +819,7 @@ LuaBindings::common (lua_State* L)
 		.beginClass <Temporal::Point> ("Point")
 		.addFunction ("sclock", &Temporal::Point::sclock)
 		.addFunction ("beats", &Temporal::Point::beats)
-		.addFunction ("sample", &Temporal::Point::sample)
+		.addFunction ("sample", &Temporal::Point::sample_is_dangerous)
 		.addFunction ("bbt", &Temporal::Point::bbt)
 		.addFunction ("time", &Temporal::Point::time)
 		.endClass ()
@@ -1376,7 +1377,8 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("set_bypassed", &PannerShell::set_bypassed)
 		.endClass ()
 
-		.deriveClass <RouteGroup, SessionObject> ("RouteGroup")
+		.deriveWSPtrClass <RouteGroup, SessionObject> ("RouteGroup")
+		.addNilPtrConstructor ()
 		.addFunction ("is_active", &RouteGroup::is_active)
 		.addFunction ("is_relative", &RouteGroup::is_relative)
 		.addFunction ("is_hidden", &RouteGroup::is_hidden)
@@ -2317,8 +2319,8 @@ LuaBindings::common (lua_State* L)
 		.beginConstStdList <std::weak_ptr<Route> > ("WeakRouteList")
 		.endClass ()
 
-		// RouteGroupList == std::list<RouteGroup*>
-		.beginConstStdCPtrList <RouteGroup> ("RouteGroupList")
+		// RouteGroupList == std::list<shared_ptr<RouteGroup>>
+		.beginStdList <std::shared_ptr<RouteGroup>> ("RouteGroupList")
 		.endClass ()
 
 		// typedef std::vector<std::shared_ptr<Source> > Region::SourceList
@@ -2383,6 +2385,9 @@ LuaBindings::common (lua_State* L)
 		.endClass ()
 
 		.beginStdMap <PBD::ID, PBD::ID> ("IDMap")
+		.endClass ()
+
+		.beginStdMap <PBD::ID, Session::RouteImportInfo> ("RouteStateMap")
 		.endClass ()
 
 		//std::list<std::shared_ptr<Port> > PortList
@@ -2665,6 +2670,12 @@ LuaBindings::common (lua_State* L)
 		.beginNamespace ("CueBehavior")
 		.addConst ("FollowCues", ARDOUR::CueBehavior(FollowCues))
 		.addConst ("ImplicitlyIgnoreCues", ARDOUR::CueBehavior(ImplicitlyIgnoreCues))
+		.endNamespace ()
+
+		.beginNamespace ("RouteGroupImportMode")
+		.addConst ("IgnoreRouteGroup", ARDOUR::Session::RouteGroupImportMode(Session::IgnoreRouteGroup))
+		.addConst ("UseRouteGroup", ARDOUR::Session::RouteGroupImportMode(Session::UseRouteGroup))
+		.addConst ("CreateRouteGroup", ARDOUR::Session::RouteGroupImportMode(Session::CreateRouteGroup))
 		.endNamespace ()
 
 		.beginNamespace ("WellKnownCtrl")
@@ -3144,6 +3155,11 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("name", &Session::name)
 		.addFunction ("path", &Session::path)
 		.addFunction ("uuid", &Session::uuid)
+		.addFunction ("empty", &Session::empty)
+		.addFunction ("nroutes", &Session::nroutes)
+		.addFunction ("ntracks", &Session::ntracks)
+		.addFunction ("naudiotracks", &Session::naudiotracks)
+		.addFunction ("nbusses", &Session::nbusses)
 		.addFunction ("record_status", &Session::record_status)
 		.addFunction ("maybe_enable_record", &Session::maybe_enable_record)
 		.addFunction ("disable_record", &Session::disable_record)
@@ -3189,7 +3205,7 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("maybe_update_session_range", &Session::maybe_update_session_range)
 		.addFunction ("remove_route", &Session::remove_route)
 		.addFunction ("remove_routes", &Session::remove_routes)
-		.addFunction ("remove_route_group", (void (Session::*)(RouteGroup*))&Session::remove_route_group)
+		.addFunction ("remove_route_group", &Session::remove_route_group)
 		.addFunction ("cut_copy_section", &Session::cut_copy_section)
 		.addFunction ("vca_manager", &Session::vca_manager_ptr)
 		.addExtCFunction ("timecode_to_sample_lua", ARDOUR::LuaAPI::timecode_to_sample_lua)

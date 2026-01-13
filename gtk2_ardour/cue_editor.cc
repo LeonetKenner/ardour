@@ -281,15 +281,6 @@ CueEditor::set_zoom_focus (Editing::ZoomFocus zf)
 
 	using namespace Editing;
 
-	/* this is driven by a toggle on a radio group, and so is invoked twice,
-	   once for the item that became inactive and once for the one that became
-	   active.
-	*/
-
-	if (!zoom_focus_actions[zf]->get_active()) {
-		return;
-	}
-
 	/* We don't allow playhead for zoom focus here */
 
 	if (zf == ZoomFocusPlayhead) {
@@ -1189,12 +1180,14 @@ CueEditor::max_zoom_extent() const
 
 		if (show_source) {
 			len = _region->source()->length().beats();
+			if (len != Temporal::Beats()) {
+				return std::make_pair (timepos_t (Temporal::Beats()), timepos_t (_region->end().beats()));
+			}
 		} else {
 			len = _region->length().beats();
-		}
-
-		if (len != Temporal::Beats()) {
-			return std::make_pair (Temporal::timepos_t (Temporal::Beats()), Temporal::timepos_t (len));
+			if (len != Temporal::Beats()) {
+				return std::make_pair (timepos_t (_region->start().beats()), timepos_t (_region->end().beats()));
+			}
 		}
 	}
 
@@ -1203,7 +1196,7 @@ CueEditor::max_zoom_extent() const
 }
 
 void
-CueEditor::zoom_to_show (Temporal::timecnt_t const & duration)
+CueEditor::zoom_to_show (std::pair<Temporal::timepos_t,Temporal::timepos_t> const & z)
 {
 	EC_LOCAL_TEMPO_SCOPE;
 
@@ -1212,7 +1205,7 @@ CueEditor::zoom_to_show (Temporal::timecnt_t const & duration)
 		return;
 	}
 
-	reset_zoom ((samplecnt_t) floor (duration.samples() / _track_canvas_width));
+	reposition_and_zoom (z.first.samples(), (samplecnt_t) floor ((max_extents_scale() * ((z.second.samples() - z.first.samples())) / (double) _track_canvas_width)));
 }
 
 void
@@ -1837,7 +1830,7 @@ CueEditor::metric_get_bbt (std::vector<ArdourCanvas::Ruler::Mark>& marks, sample
 							}
 						}
 						mark.label = buf;
-						mark.position = (*i).sample (sr);
+						mark.position = (*i).sample_is_dangerous (sr);
 						marks.push_back (mark);
 					}
 				}
@@ -1861,7 +1854,7 @@ CueEditor::metric_get_bbt (std::vector<ArdourCanvas::Ruler::Mark>& marks, sample
 					}
 				}
 				mark.label = buf;
-				mark.position = (*i).sample(sr);
+				mark.position = (*i).sample_is_dangerous (sr);
 				marks.push_back (mark);
 			  }
 			}
@@ -1881,7 +1874,7 @@ CueEditor::metric_get_bbt (std::vector<ArdourCanvas::Ruler::Mark>& marks, sample
 						mark.style = ArdourCanvas::Ruler::Mark::Minor;
 					}
 					mark.label = buf;
-					mark.position = (*i).sample (sr);
+					mark.position = (*i).sample_is_dangerous (sr);
 					marks.push_back (mark);
 				}
 			}
@@ -1895,7 +1888,7 @@ CueEditor::metric_get_bbt (std::vector<ArdourCanvas::Ruler::Mark>& marks, sample
 				snprintf (buf, sizeof(buf), "%" PRIu32, bbt.bars);
 				mark.style = ArdourCanvas::Ruler::Mark::Major;
 				mark.label = buf;
-				mark.position = (*i).sample (sr);
+				mark.position = (*i).sample_is_dangerous (sr);
 				marks.push_back (mark);
 			}
 		}
@@ -1912,7 +1905,7 @@ CueEditor::metric_get_bbt (std::vector<ArdourCanvas::Ruler::Mark>& marks, sample
 
 			BBT_Time bbt ((*i).bbt());
 
-			if ((*i).sample (sr) < leftmost && (bbt_bar_helper_on)) {
+			if ((*i).sample_is_dangerous (sr) < leftmost && (bbt_bar_helper_on)) {
 				snprintf (buf, sizeof(buf), "<%" PRIu32 "|%" PRIu32, bbt.bars, bbt.beats);
 				edit_last_mark_label (marks, buf);
 			} else {
@@ -1928,7 +1921,7 @@ CueEditor::metric_get_bbt (std::vector<ArdourCanvas::Ruler::Mark>& marks, sample
 					buf[0] = '\0';
 				}
 				mark.label = buf;
-				mark.position = (*i).sample (sr);
+				mark.position = (*i).sample_is_dangerous (sr);
 				marks.push_back (mark);
 			}
 		}
@@ -1951,7 +1944,7 @@ CueEditor::metric_get_bbt (std::vector<ArdourCanvas::Ruler::Mark>& marks, sample
 
 			BBT_Time bbt ((*i).bbt());
 
-			if ((*i).sample (sr) < leftmost && (bbt_bar_helper_on)) {
+			if ((*i).sample_is_dangerous (sr) < leftmost && (bbt_bar_helper_on)) {
 				snprintf (buf, sizeof(buf), "<%" PRIu32 "|%" PRIu32, bbt.bars, bbt.beats);
 				edit_last_mark_label (marks, buf);
 				helper_active = true;
@@ -1968,11 +1961,11 @@ CueEditor::metric_get_bbt (std::vector<ArdourCanvas::Ruler::Mark>& marks, sample
 					buf[0] = '\0';
 				}
 
-				if (((*i).sample(sr) < bbt_position_of_helper) && helper_active) {
+				if (((*i).sample_is_dangerous (sr) < bbt_position_of_helper) && helper_active) {
 					buf[0] = '\0';
 				}
 				mark.label =  buf;
-				mark.position = (*i).sample (sr);
+				mark.position = (*i).sample_is_dangerous (sr);
 				marks.push_back (mark);
 			}
 		}

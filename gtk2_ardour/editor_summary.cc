@@ -25,6 +25,8 @@
 
 #include "ardour/session.h"
 
+#include <ydk/gdk.h>
+
 #include <ytkmm/menu.h>
 #include <ytkmm/menuitem.h>
 
@@ -773,7 +775,22 @@ EditorSummary::on_scroll_event (GdkEventScroll* ev)
 	get_editor (&xr);
 	double x = xr.first;
 
-	switch (ev->direction) {
+	GdkScrollDirection direction = ev->direction;
+
+	if (ev->state & Keyboard::TertiaryModifier) {
+		switch (ev->direction) {
+			case GDK_SCROLL_UP:
+				direction = GDK_SCROLL_LEFT;
+				break;
+			case GDK_SCROLL_DOWN:
+				direction = GDK_SCROLL_RIGHT;
+				break;
+			default:
+				break;
+		}
+	}
+
+	switch (direction) {
 		case GDK_SCROLL_UP: {
 
 			summary_zoom_step (-4);

@@ -4029,8 +4029,10 @@ Editor::_get_preferred_edit_position (EditIgnoreOption ignore, bool from_context
 		if (_dragging_playhead) {
 			/* NOTE: since the user is dragging with the mouse, this operation will implicitly be Snapped */
 			where = timepos_t (_playhead_cursor->current_sample());
-		} else {
+		} else if (_session) {
 			where = timepos_t (_session->audible_sample());
+		} else {
+			where = timepos_t (0);
 		}
 		DEBUG_TRACE (DEBUG::CutNPaste, string_compose ("GPEP: use playhead @ %1\n", where));
 		break;
@@ -5094,7 +5096,7 @@ Editor::get_stripable_time_axis_by_id (const PBD::ID& id) const
 }
 
 void
-Editor::fit_route_group (RouteGroup *g)
+Editor::fit_route_group (std::shared_ptr<RouteGroup> g)
 {
 	TrackViewList ts = axis_views_from_routes (g->route_list ());
 	fit_tracks (ts);

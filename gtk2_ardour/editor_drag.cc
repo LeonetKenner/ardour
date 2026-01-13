@@ -1767,7 +1767,7 @@ RegionMoveDrag::create_destination_time_axis (std::shared_ptr<Region> region, Ti
 			                                                   Config->get_strict_io () || Profile->get_mixbus (),
 			                                                   std::shared_ptr<ARDOUR::PluginInfo> (),
 			                                                   (ARDOUR::Plugin::PresetRecord*)0,
-			                                                   (ARDOUR::RouteGroup*)0, 1, region->name (), PresentationInfo::max_order, Normal, true);
+			                                                   nullptr, 1, region->name (), PresentationInfo::max_order, Normal, true);
 			tav         = _editor.time_axis_view_from_stripable (midi_tracks.front ());
 		}
 
@@ -3078,6 +3078,12 @@ MeterMarkerDrag::MeterMarkerDrag (Editor& e, ArdourCanvas::Item* i, bool c)
 	, _old_snap_mode (e.snap_mode ())
 	, before_state (0)
 {
+	Temporal::MeterPoint const & mp (_marker->meter());
+
+	if (dynamic_cast<Temporal::MusicTimePoint const *> (&mp)) {
+		throw failed_constructor ();
+	}
+
 	DEBUG_TRACE (DEBUG::Drags, "New MeterMarkerDrag\n");
 	assert (_marker);
 	_movable = !TempoMap::use ()->is_initial (_marker->meter ());
@@ -3141,7 +3147,7 @@ MeterMarkerDrag::motion (GdkEvent* event, bool first_move)
 		/* it was moved */
 		_editor.mid_tempo_change (Editor::MeterChanged);
 		show_verbose_cursor_time (timepos_t (_marker->meter ().beats ()));
-		editing_context.set_snapped_cursor_position (timepos_t (_marker->meter ().sample (editing_context.session ()->sample_rate ())));
+		editing_context.set_snapped_cursor_position (timepos_t (_marker->meter ().sample_is_dangerous (editing_context.session ()->sample_rate ())));
 	}
 }
 
@@ -3280,6 +3286,11 @@ TempoMarkerDrag::TempoMarkerDrag (Editor& e, ArdourCanvas::Item* i)
 
 	_marker       = reinterpret_cast<TempoMarker*> (_item->get_data ("marker"));
 	_real_section = &_marker->tempo ();
+
+	if (dynamic_cast<Temporal::MusicTimePoint const *> (_real_section)) {
+		throw failed_constructor ();
+	}
+
 	_movable      = !TempoMap::use ()->is_initial (_marker->tempo ());
 	_grab_bpm     = _real_section->note_types_per_minute ();
 	_grab_qn      = _real_section->beats ();
@@ -3427,7 +3438,7 @@ BBTMarkerDrag::finished (GdkEvent* event, bool movement_occurred)
 		_editor.abort_tempo_map_edit ();
 
 		if (was_double_click ()) {
-			_editor.edit_bbt (point);
+			_editor.edit_bbt (*_marker);
 		}
 
 		return;
@@ -3806,7 +3817,7 @@ TempoEndDrag::start_grab (GdkEvent* event, Gdk::Cursor* cursor)
 	if ((prev = map->previous_tempo (*_tempo)) != 0) {
 		_editor.tempo_curve_selected (prev, true);
 		const samplecnt_t sr = _editor.session ()->sample_rate ();
-		sstr << "end: " << fixed << setprecision (3) << map->tempo_at (samples_to_superclock (_tempo->sample (sr) - 1, sr)).end_note_types_per_minute () << "\n";
+		sstr << "end: " << fixed << setprecision (3) << map->tempo_at (samples_to_superclock (_tempo->sample_is_dangerous (sr) - 1, sr)).end_note_types_per_minute () << "\n";
 	}
 
 	if (_tempo->continuing ()) {
@@ -3846,7 +3857,7 @@ TempoEndDrag::motion (GdkEvent* event, bool first_move)
 
 	ostringstream     sstr;
 	const samplecnt_t sr = editing_context.session ()->sample_rate ();
-	sstr << "end: " << fixed << setprecision (3) << map->tempo_at (samples_to_superclock (_tempo->sample (sr) - 1, sr)).end_note_types_per_minute () << "\n";
+	sstr << "end: " << fixed << setprecision (3) << map->tempo_at (samples_to_superclock (_tempo->sample_is_dangerous (sr) - 1, sr)).end_note_types_per_minute () << "\n";
 
 	if (_tempo->continuing ()) {
 		sstr << "start: " << fixed << setprecision (3) << _tempo->note_types_per_minute ();
@@ -5637,14 +5648,14 @@ SelectionDrag::motion (GdkEvent* event, bool first_move)
 				 */
 				TrackViewList       tracks_to_add;
 				TrackViewList       tracks_to_remove;
-				vector<RouteGroup*> selected_route_groups;
+				vector<std::shared_ptr<RouteGroup>> selected_route_groups;
 
 				if (!first_move) {
 					for (TrackViewList::const_iterator i = editing_context.get_selection().tracks.begin (); i != editing_context.get_selection().tracks.end (); ++i) {
 						if (!new_selection.contains (*i) && !_track_selection_at_start.contains (*i)) {
 							tracks_to_remove.push_back (*i);
 						} else {
-							RouteGroup* rg = (*i)->route_group ();
+							std::shared_ptr<RouteGroup> rg ((*i)->route_group ());
 							if (rg && rg->is_active () && rg->is_select () && gcd != Controllable::NoGroup) {
 								selected_route_groups.push_back (rg);
 							}
@@ -5655,7 +5666,7 @@ SelectionDrag::motion (GdkEvent* event, bool first_move)
 				for (TrackViewList::const_iterator i = new_selection.begin (); i != new_selection.end (); ++i) {
 					if (!editing_context.get_selection().tracks.contains (*i)) {
 						tracks_to_add.push_back (*i);
-						RouteGroup* rg = (*i)->route_group ();
+						std::shared_ptr<RouteGroup> rg ((*i)->route_group ());
 
 						if (rg && rg->is_active () && rg->is_select () && gcd != Controllable::NoGroup) {
 							selected_route_groups.push_back (rg);
@@ -5672,7 +5683,7 @@ SelectionDrag::motion (GdkEvent* event, bool first_move)
 					 */
 
 					for (TrackViewList::iterator i = tracks_to_remove.begin (); i != tracks_to_remove.end ();) {
-						RouteGroup* rg = (*i)->route_group ();
+						std::shared_ptr<RouteGroup> rg ((*i)->route_group ());
 
 						if (rg && find (selected_route_groups.begin (), selected_route_groups.end (), rg) != selected_route_groups.end ()) {
 							i = tracks_to_remove.erase (i);

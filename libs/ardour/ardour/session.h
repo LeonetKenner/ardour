@@ -359,6 +359,7 @@ public:
 	uint32_t ntracks () const;
 	uint32_t naudiotracks () const;
 	uint32_t nbusses () const;
+	bool     empty () const;
 
 	bool plot_process_graph (std::string const& file_name) const;
 
@@ -467,15 +468,15 @@ public:
 	/** Emitted when a property of one of our route groups changes.
 	 *  The parameter is the RouteGroup that has changed.
 	 */
-	PBD::Signal<void(RouteGroup *)> RouteGroupPropertyChanged;
+	PBD::Signal<void(std::shared_ptr<RouteGroup>)> RouteGroupPropertyChanged;
 	/** Emitted when a route is added to one of our route groups.
 	 *  First parameter is the RouteGroup, second is the route.
 	 */
-	PBD::Signal<void(RouteGroup *, std::weak_ptr<Route> )> RouteAddedToRouteGroup;
+	PBD::Signal<void(std::shared_ptr<RouteGroup>, std::weak_ptr<Route> )> RouteAddedToRouteGroup;
 	/** Emitted when a route is removed from one of our route groups.
 	 *  First parameter is the RouteGroup, second is the route.
 	 */
-	PBD::Signal<void(RouteGroup *, std::weak_ptr<Route> )> RouteRemovedFromRouteGroup;
+	PBD::Signal<void(std::shared_ptr<RouteGroup>, std::weak_ptr<Route> )> RouteRemovedFromRouteGroup;
 
 	/** Emitted when a foldback send is created or deleted
 	 */
@@ -744,26 +745,24 @@ public:
 		bool _reconfigure_on_delete;
 	};
 
-	RouteGroup* new_route_group (const std::string&);
-	void add_route_group (RouteGroup *);
-	void remove_route_group (RouteGroup* rg) { if (rg) remove_route_group (*rg); }
-	void remove_route_group (RouteGroup&);
-	void reorder_route_groups (std::list<RouteGroup*>);
+	std::shared_ptr<RouteGroup> new_route_group (const std::string&);
+	void add_route_group (std::shared_ptr<RouteGroup>);
+	void remove_route_group (std::shared_ptr<RouteGroup> rg);
+	void reorder_route_groups (RouteGroupList);
 
-	RouteGroup* route_group_by_name (std::string);
-	RouteGroup& all_route_group() const;
+	std::shared_ptr<RouteGroup> route_group_by_name (std::string);
 
-	PBD::Signal<void(RouteGroup*)> route_group_added;
+	PBD::Signal<void(std::shared_ptr<RouteGroup>)> route_group_added;
 	PBD::Signal<void()>             route_group_removed;
 	PBD::Signal<void()>             route_groups_reordered;
 
-	void foreach_route_group (std::function<void(RouteGroup*)> f) {
-		for (std::list<RouteGroup *>::iterator i = _route_groups.begin(); i != _route_groups.end(); ++i) {
-			f (*i);
+	void foreach_route_group (std::function<void(std::shared_ptr<RouteGroup>)> f) {
+		for (auto & rg : _route_groups) {
+			f (rg);
 		}
 	}
 
-	std::list<RouteGroup*> const & route_groups () const {
+	RouteGroupList const & route_groups () const {
 		return _route_groups;
 	}
 
@@ -772,7 +771,23 @@ public:
 	std::list<std::shared_ptr<AudioTrack> > new_audio_track (
 		int input_channels,
 		int output_channels,
-		RouteGroup* route_group,
+		std::shared_ptr<RouteGroup> route_group,
+		uint32_t how_many,
+		std::string name_template,
+		PresentationInfo::order_t order,
+		TrackMode mode = Normal,
+		bool input_auto_connect = true,
+		bool trigger_visibility = false
+		);
+
+	/* Call this repeatedly with different track name templates and finally call add_routes.
+	 * useful for speeding up imports of various kinds that involve lots of tracks */
+	bool new_audio_routes_tracks_bulk (
+		RouteList& routes,
+		std::list<std::shared_ptr<AudioTrack> >& tracks,
+		int input_channels,
+		int output_channels,
+		std::shared_ptr<RouteGroup> route_group,
 		uint32_t how_many,
 		std::string name_template,
 		PresentationInfo::order_t order,
@@ -785,15 +800,15 @@ public:
 		const ChanCount& input, const ChanCount& output, bool strict_io,
 		std::shared_ptr<PluginInfo> instrument,
 		Plugin::PresetRecord* pset,
-		RouteGroup* route_group, uint32_t how_many, std::string name_template,
+		std::shared_ptr<RouteGroup> route_group, uint32_t how_many, std::string name_template,
 		PresentationInfo::order_t,
 		TrackMode mode,
 		bool input_auto_connect,
 		bool trigger_visibility = false
 		);
 
-	RouteList new_audio_route (int input_channels, int output_channels, RouteGroup* route_group, uint32_t how_many, std::string name_template, PresentationInfo::Flag, PresentationInfo::order_t);
-	RouteList new_midi_route (RouteGroup* route_group, uint32_t how_many, std::string name_template, bool strict_io, std::shared_ptr<PluginInfo> instrument, Plugin::PresetRecord*, PresentationInfo::Flag, PresentationInfo::order_t);
+	RouteList new_audio_route (int input_channels, int output_channels, std::shared_ptr<RouteGroup> route_group, uint32_t how_many, std::string name_template, PresentationInfo::Flag, PresentationInfo::order_t);
+	RouteList new_midi_route (std::shared_ptr<RouteGroup> route_group, uint32_t how_many, std::string name_template, bool strict_io, std::shared_ptr<PluginInfo> instrument, Plugin::PresetRecord*, PresentationInfo::Flag, PresentationInfo::order_t);
 
 	void remove_routes (std::shared_ptr<RouteList>);
 	void remove_route (std::shared_ptr<Route>);
@@ -1350,7 +1365,7 @@ public:
 	void import_pt_rest (PTFFormat& ptf);
 	bool import_sndfile_as_region (std::string path, SrcQuality quality, timepos_t& pos, SourceList& sources, ImportStatus& status, uint32_t current, uint32_t total);
 
-	struct ptflookup {
+	typedef struct ptflookup {
 		uint16_t index1;
 		uint16_t index2;
 		PBD::ID  id;
@@ -1358,9 +1373,8 @@ public:
 		bool operator ==(const struct ptflookup& other) {
 			return (this->index1 == other.index1);
 		}
-	};
-	std::vector<struct ptflookup> ptfwavpair;
-	SourceList pt_imported_sources;
+	} PtfLookup;
+	std::vector<PtfLookup> ptfregpair;
 
 	enum TimingTypes {
 		OverallProcess = 0,
@@ -1947,8 +1961,8 @@ private:
 
 	int load_route_groups (const XMLNode&, int);
 
-	std::list<RouteGroup *> _route_groups;
-	RouteGroup*             _all_route_group;
+	RouteGroupList _route_groups;
+	void route_group_emptied (std::shared_ptr<RouteGroup>);
 
 	/* routes stuff */
 
@@ -2003,9 +2017,9 @@ private:
 	int load_regions (const XMLNode& node);
 	int load_compounds (const XMLNode& node);
 
-	void route_added_to_route_group (RouteGroup *, std::weak_ptr<Route>);
-	void route_removed_from_route_group (RouteGroup *, std::weak_ptr<Route>);
-	void route_group_property_changed (RouteGroup *);
+	void route_added_to_route_group (std::shared_ptr<RouteGroup>, std::weak_ptr<Route>);
+	void route_removed_from_route_group (std::shared_ptr<RouteGroup>, std::weak_ptr<Route>);
+	void route_group_property_changed (std::weak_ptr<RouteGroup>);
 
 	/* SOURCES */
 

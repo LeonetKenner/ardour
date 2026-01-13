@@ -164,7 +164,7 @@ Editor::make_tempo_marker (Temporal::TempoPoint const * ts, TempoPoint const *& 
 	const std::string tname (X_(""));
 	char const * color_name = X_("tempo marker");
 
-	tempo_marks.insert (before, new TempoMarker (*this, *tempo_group, color_name, tname, *ts, ts->sample (sr), tc_color));
+	tempo_marks.insert (before, new TempoMarker (*this, *tempo_group, color_name, tname, *ts, ts->sample_is_dangerous (sr), tc_color));
 
 	/* XXX the point of this code was "a jump in tempo by more than 1 ntpm results in a red
 	   tempo mark pointer."  (3a7bc1fd3f32f0)
@@ -278,7 +278,7 @@ Editor::update_tempo_curves (double min_tempo, double max_tempo, samplecnt_t sr)
 
 		if (tmp != tempo_marks.end()) {
 			TempoMarker* nxt = static_cast<TempoMarker*>(*tmp);
-			curve.set_duration (nxt->tempo().sample(sr) - tm->tempo().sample(sr));
+			curve.set_duration (nxt->tempo().sample_is_dangerous (sr) - tm->tempo().sample_is_dangerous (sr));
 		} else {
 			curve.set_duration (samplecnt_t (UINT32_MAX));
 		}
@@ -472,9 +472,12 @@ Editor::mouse_add_new_meter_event (timepos_t pos)
 
 	Temporal::BBT_Time r;
 	meter_dialog.get_bbt_time (r);
-	Temporal::BBT_Argument requested (superclock_t (0), r);
 
 	TempoMapChange tmc (*this, _("add time signature"));
+	superclock_t sc (tmc.map().previous_bbt_reference_at_superclock (samples_to_superclock (pos.samples(), TEMPORAL_SAMPLE_RATE)));
+
+	Temporal::BBT_Argument requested (sc, r);
+
 	pos = timepos_t (tmc.map().quarters_at (requested));
 	tmc.map().set_meter (Meter (bpb, note_type), pos);
 }
@@ -576,7 +579,7 @@ Editor::edit_meter_section (Temporal::MeterPoint& section)
 		return;
 	}
 
-	Temporal::TempoMetric tm (TempoMap::use()->metric_at (timepos_t (section.sample(TEMPORAL_SAMPLE_RATE))));
+	Temporal::TempoMetric tm (TempoMap::use()->metric_at (timepos_t::from_superclock (section.sclock())));
 	Temporal::MeterPoint const * mpp (TempoMap::use()->previous_meter (tm.meter()));
 
 	double bpb = meter_dialog.get_bpb ();
@@ -633,8 +636,9 @@ Editor::edit_meter_section (Temporal::MeterPoint& section)
 }
 
 void
-Editor::edit_bbt (MusicTimePoint& point)
+Editor::edit_bbt (BBTMarker& bm)
 {
+	MusicTimePoint const & point (bm.mt_point());
 	BBTMarkerDialog dialog (point);
 
 	switch (dialog.run ()) {
@@ -645,16 +649,24 @@ Editor::edit_bbt (MusicTimePoint& point)
 		return;
 	}
 
-	if (dialog.bbt_value() == point.bbt()) {
-		/* just a name change, no need to modify the map */
-		point.set_name (dialog.name());
-		/* XXX need to update marker label */
-		return;
-	}
+	BBT_Time bbt (dialog.bbt_value());
+	Temporal::timepos_t pos (dialog.position());
+	std::string name (dialog.name());
 
-	TempoMapChange tmc (*this, _("edit tempo"));
-	tmc.map().remove_bartime (point);
-	tmc.map().set_bartime (dialog.bbt_value(), dialog.position(), dialog.name());
+	if (bbt != point.bbt() ||
+	    pos.superclocks() != point.sclock() ||
+	    name != point.name()) {
+		TempoMapChange tmc (*this, _("edit tempo"));
+		tmc.map().remove_bartime (point);
+		tmc.map().set_bartime (bbt, pos, name);
+
+		/* XXX this ought to be set via MVC-style design, but currently
+		 * there is no signal to notify anyone that the
+		 * MusicTimePoint's name has been changed.
+		 */
+
+		bm.set_name (name);
+	}
 }
 
 void
@@ -669,7 +681,7 @@ Editor::edit_tempo_section (TempoPoint& section)
 		return;
 	}
 
-	Temporal::TempoMetric tm (TempoMap::use()->metric_at (timepos_t (section.sample (TEMPORAL_SAMPLE_RATE))));
+	Temporal::TempoMetric tm (TempoMap::use()->metric_at (timepos_t::from_superclock (section.sclock())));
 	Temporal::TempoPoint const * tpp (TempoMap::use()->previous_tempo (tm.tempo()));
 
 	double bpm = tempo_dialog.get_bpm ();
@@ -742,7 +754,7 @@ Editor::edit_meter_marker (MeterMarker& mm)
 void
 Editor::edit_bbt_marker (BBTMarker& bm)
 {
-	edit_bbt (const_cast<Temporal::MusicTimePoint&>(bm.mt_point()));
+	edit_bbt (bm);
 }
 
 gint
