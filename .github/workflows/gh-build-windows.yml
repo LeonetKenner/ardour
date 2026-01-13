@@ -2,9 +2,13 @@ name: Build Ardour (Native Windows MinGW – Nightly)
 
 on:
   push:
-    branches: [ main, master ]
+    branches:
+      - main
+      - master
   pull_request:
-    branches: [ main, master ]
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 jobs:
@@ -114,10 +118,7 @@ jobs:
         run: |
           /mingw64/bin/python ./waf
 
-      - name: Install to Prefix
-        shell: msys2 {0}
-        run: |
-          /mingw64/bin/python ./waf install
+      # NOTE: "Install to Prefix" step intentionally removed
 
       - name: Package
         shell: msys2 {0}
