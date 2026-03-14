@@ -175,7 +175,25 @@ public:
 
 	void toggle_monitor_action (ARDOUR::MonitorChoice monitor_choice, bool group_override = false, bool all = false);
 
+	class RedisplaySuspender {
+		public:
+			RedisplaySuspender() {
+				Mixer_UI::instance()->no_track_list_redisplay = true;
+				Mixer_UI::instance()->ignore_track_reorder = true;
+				Mixer_UI::instance()->_in_group_rebuild_or_clear = true;
+			}
+			~RedisplaySuspender () {
+				Mixer_UI::instance()->no_track_list_redisplay = false;
+				Mixer_UI::instance()->ignore_track_reorder = false;
+				Mixer_UI::instance()->redisplay_track_list ();
+				Mixer_UI::instance()->redisplay_track_list ();
+				Mixer_UI::instance()->route_groups_changed ();
+			}
+	};
+
 protected:
+	friend class RedisplaySuspender;
+
 	void set_axis_targets_for_operation ();
 	PBD::ControllableSet selected_gaincontrols ();
 
@@ -199,6 +217,8 @@ private:
 	Gtk::HBox             favorite_plugins_search_hbox;
 	Gtk::Entry            plugin_search_entry;
 	ArdourWidgets::ArdourButton plugin_search_clear_button;
+	Gtk::VBox             strip_templates_vbox;
+	Gtk::ScrolledWindow   strip_templates_scroller;
 	ArdourWidgets::HPane  inner_pane;
 	Gtk::VBox             strip_group_box;
 	Gtk::HBox             strip_packer;
@@ -291,6 +311,13 @@ private:
 	void plugin_drop (const Glib::RefPtr<Gdk::DragContext>&, const Gtk::SelectionData& data);
 	bool plugin_drag_motion (Glib::RefPtr<Gdk::DragContext> const&, int, int, guint);
 
+	void strip_templates_changed ();
+	void strip_template_drag_data_get (Glib::RefPtr<Gdk::DragContext> const&, Gtk::SelectionData&, guint, guint);
+	void strip_template_drag_begin (Glib::RefPtr<Gdk::DragContext> const&);
+	void strip_template_row_activated (const Gtk::TreeModel::Path&, Gtk::TreeViewColumn*);
+	bool strip_template_row_button_press (GdkEventButton*);
+	void apply_strip_template (std::string const&);
+
 	enum ProcessorPosition {
 		AddTop,
 		AddPreFader,
@@ -376,6 +403,18 @@ private:
 		Gtk::TreeModelColumn<std::shared_ptr<ARDOUR::RouteGroup>> group;
 	};
 
+	struct StripTemplateModelColumns : public Gtk::TreeModel::ColumnRecord {
+		StripTemplateModelColumns() {
+			add (name);
+			add (path);
+			add (desc);
+		}
+
+		Gtk::TreeModelColumn<std::string> name;
+		Gtk::TreeModelColumn<std::string> path;
+		Gtk::TreeModelColumn<std::string> desc;
+	};
+
 	struct PluginsDisplayModelColumns : public Gtk::TreeModel::ColumnRecord {
 		PluginsDisplayModelColumns() {
 			add (name);
@@ -392,14 +431,17 @@ private:
 
 	StripableDisplayModelColumns stripable_columns;
 	GroupDisplayModelColumns     group_columns;
+	StripTemplateModelColumns    strip_template_columns;
 	PluginsDisplayModelColumns   favorite_plugins_columns;
 
 	Gtk::TreeView track_display;
 	Gtk::TreeView group_display;
+	Gtk::TreeView strip_template_display;
 	Gtkmm2ext::DnDTreeView<ARDOUR::PluginPresetPtr> favorite_plugins_display;
 
 	Glib::RefPtr<Gtk::ListStore> track_model;
 	Glib::RefPtr<Gtk::ListStore> group_model;
+	Glib::RefPtr<Gtk::ListStore> strip_template_model;
 	Glib::RefPtr<PluginTreeStore> favorite_plugins_model;
 
 	bool group_display_button_press (GdkEventButton*);
@@ -500,4 +542,3 @@ private:
 	void toggle_processors ();
 	void ab_plugins ();
 };
-

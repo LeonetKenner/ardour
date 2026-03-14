@@ -1934,6 +1934,7 @@ static std::list<Gtk::TargetEntry> drop_targets()
 	tmp.push_back (Gtk::TargetEntry ("x-ardour/processor", Gtk::TARGET_SAME_APP)); // from processor-box to processor-box
 	tmp.push_back (Gtk::TargetEntry ("x-ardour/plugin.info", Gtk::TARGET_SAME_APP)); // from plugin-manager
 	tmp.push_back (Gtk::TargetEntry ("x-ardour/plugin.favorite", Gtk::TARGET_SAME_APP)); // from sidebar
+	tmp.push_back (Gtk::TargetEntry ("x-ardour/route.template", Gtk::TARGET_SAME_APP)); // from sidebar
 	return tmp;
 }
 
@@ -2139,6 +2140,23 @@ ProcessorBox::_drop_plugin (Gtk::SelectionData const &data, Route::ProcessorList
 }
 
 void
+ProcessorBox::_drop_strip_template (Gtk::SelectionData const &data)
+{
+	std::string path = data.get_data_as_string ();
+	XMLTree tree;
+	if (!tree.read (path)) {
+		error << string_compose (_("Could not understand state file \"%1\""), path) << endmsg;
+		return;
+	}
+	if (tree.root()->name() != X_("Route") ) {
+		error << string_compose (_("Invalid route template file \"%1\""), path) << endmsg;
+		return;
+	}
+
+	_route->import_state (*tree.root(), false);
+}
+
+void
 ProcessorBox::plugin_drop (Gtk::SelectionData const &data, ProcessorEntry* position, Glib::RefPtr<Gdk::DragContext> const & context)
 {
 	if (!_session) {
@@ -2153,6 +2171,10 @@ ProcessorBox::plugin_drop (Gtk::SelectionData const &data, ProcessorEntry* posit
 	}
 	else if (data.get_target() == "x-ardour/plugin.favorite") {
 		_drop_plugin_preset (data, pl);
+	}
+	else if (data.get_target() == "x-ardour/route.template") {
+		_drop_strip_template (data);
+		return;
 	}
 	else {
 		return;
@@ -2826,10 +2848,17 @@ ProcessorBox::use_plugins (const SelectedPlugins& plugins)
 
 		Route::ProcessorStreams err_streams;
 
-		if (_route->add_processor_by_index (processor, _placement, &err_streams, Config->get_new_plugins_active ())) {
-			weird_plugin_dialog (**p, err_streams);
-			return true;
+		int rv =_route->add_processor_by_index (processor, _placement, &err_streams, Config->get_new_plugins_active ());
+
+		if (rv == -1) {
+			MessageDialog am (_("Cannot add plugin while recording"));
+			am.run ();
 			// XXX SHAREDPTR delete plugin here .. do we even need to care?
+			return true;
+		} else if (rv != 0) {
+			weird_plugin_dialog (**p, err_streams);
+			// XXX SHAREDPTR delete plugin here .. do we even need to care?
+			return true;
 		} else if (plugins.size() == 1 && UIConfiguration::instance().get_open_gui_after_adding_plugin()) {
 			if (processor->what_can_be_automated ().size () == 0) {
 				; /* plugin without controls, don't show ui */
@@ -2932,8 +2961,8 @@ ProcessorBox::choose_send ()
 
 	/* XXX need processor lock on route */
 	try {
-		Glib::Threads::Mutex::Lock lm (AudioEngine::instance()->process_lock());
-		send->output()->ensure_io (outs, false, this);
+		PBD::Mutex::Lock lm (AudioEngine::instance()->process_lock());
+		send->output()->ensure_io (outs, false);
 	} catch (AudioEngine::PortRegistrationFailure& err) {
 		error << string_compose (_("Cannot set up new send: %1"), err.what()) << endmsg;
 		return;

@@ -20,6 +20,12 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#if defined(COMPILER_MSVC) && defined(WAF_BUILD)
+#define NOMINMAX
+#define LIBARDOUR_DLL_EXPORTS
+/* Both defines are needed to avoid errors, regardless of WIN32_LEAN_AND_MEAN. */
+#endif
+
 #include <glibmm.h>
 
 #include "pbd/cpus.h"
@@ -1359,8 +1365,8 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("add_port", &IO::add_port)
 		.addFunction ("remove_port", &IO::remove_port)
 		.addFunction ("connect", &IO::connect)
-		.addFunction ("disconnect", (int (IO::*)(std::shared_ptr<Port>, std::string, void *))&IO::disconnect)
-		.addFunction ("disconnect_all", (int (IO::*)(void *))&IO::disconnect)
+		.addFunction ("disconnect", (int (IO::*)(std::shared_ptr<Port>, std::string))&IO::disconnect)
+		.addFunction ("disconnect_all", (int (IO::*)())&IO::disconnect)
 		.addFunction ("physically_connected", &IO::physically_connected)
 		.addFunction ("has_port", &IO::has_port)
 		.addFunction ("nth", &IO::nth)
@@ -2786,6 +2792,12 @@ LuaBindings::common (lua_State* L)
 		.addConst ("FadeSlow", ARDOUR::FadeShape(FadeSlow))
 		.addConst ("FadeConstantPower", ARDOUR::FadeShape(FadeConstantPower))
 		.addConst ("FadeSymmetric", ARDOUR::FadeShape(FadeSymmetric))
+		.endNamespace ()
+
+		.beginNamespace ("MarkerLocatePriority")
+		.addConst ("FirstMarker", ARDOUR::MarkerLocatePriority(FirstMarker))
+		.addConst ("LastMarker", ARDOUR::MarkerLocatePriority(LastMarker))
+		.addConst ("NextMarker", ARDOUR::MarkerLocatePriority(NextMarker))
 		.endNamespace ()
 
 		.beginNamespace ("LoopFadeChoice")

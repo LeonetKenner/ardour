@@ -23,11 +23,9 @@
 #include <cstdint>
 #include <sstream>
 
-#include <sys/time.h>
 #include <time.h>
 
 #include "pbd/localtime_r.h"
-#include "pbd/timersub.h"
 
 #include "midi++/parser.h"
 

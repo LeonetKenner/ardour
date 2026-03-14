@@ -34,8 +34,6 @@
 #include <sigc++/bind.h>
 
 
-#include <glibmm/threads.h>
-
 #include <ytkmm/accelmap.h>
 #include <ytkmm/menu.h>
 #include <ytkmm/offscreenwindow.h>
@@ -59,6 +57,7 @@
 #include "ardour/route_group.h"
 #include "ardour/selection.h"
 #include "ardour/session.h"
+#include "ardour/template_utils.h"
 #include "ardour/utils.h"
 #include "ardour/vca.h"
 #include "ardour/vca_manager.h"
@@ -92,6 +91,7 @@
 #include "plugin_utils.h"
 #include "route_sorter.h"
 #include "surround_strip.h"
+#include "template_dialog.h"
 #include "timers.h"
 #include "ui_config.h"
 #include "vca_master_strip.h"
@@ -210,6 +210,7 @@ Mixer_UI::Mixer_UI ()
 
 	setup_track_display ();
 
+	/* route groups */
 	group_model = ListStore::create (group_columns);
 	group_display.set_model (group_model);
 	group_display.append_column (_("Show"), group_columns.visible);
@@ -245,10 +246,31 @@ Mixer_UI::Mixer_UI ()
 
 	group_display_scroller.add (group_display);
 	group_display_scroller.set_policy (Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
-
-
 	group_display_vbox.pack_start (group_display_scroller, true, true);
 
+	/* strip templates */
+	strip_template_model = ListStore::create (strip_template_columns);
+	strip_template_display.set_model (strip_template_model);
+	strip_template_display.append_column (_("Name"), strip_template_columns.name);
+	strip_template_display.get_selection()->set_mode (Gtk::SELECTION_SINGLE);
+	strip_template_display.set_reorderable (false);
+
+	std::vector<TargetEntry> dnd;
+	dnd.push_back (TargetEntry ("x-ardour/route.template", Gtk::TARGET_SAME_APP));
+	strip_template_display.drag_source_set (dnd, Gdk::MODIFIER_MASK, Gdk::ACTION_COPY);
+	strip_template_display.signal_drag_data_get ().connect (sigc::mem_fun (*this, &Mixer_UI::strip_template_drag_data_get));
+	strip_template_display.signal_drag_begin ().connect (sigc::mem_fun (*this, &Mixer_UI::strip_template_drag_begin));
+	strip_template_display.signal_row_activated ().connect (sigc::mem_fun (*this, &Mixer_UI::strip_template_row_activated));
+	strip_template_display.signal_button_press_event().connect (sigc::mem_fun (*this, &Mixer_UI::strip_template_row_button_press), false);
+	if (UIConfiguration::instance().get_use_tooltips()) {
+		strip_template_display.set_tooltip_column (2);
+	}
+
+	strip_templates_scroller.add (strip_template_display);
+	strip_templates_scroller.set_policy (Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
+	strip_templates_vbox.pack_start (strip_templates_scroller, true, true);
+
+	/* plugin fav/preset */
 	list<TargetEntry> target_list;
 	target_list.push_back (TargetEntry ("x-ardour/plugin.preset", Gtk::TARGET_SAME_APP));
 
@@ -290,6 +312,7 @@ Mixer_UI::Mixer_UI ()
 	favorite_plugins_vbox.pack_start (favorite_plugins_scroller, true, true);
 	favorite_plugins_vbox.pack_start (favorite_plugins_search_hbox, false, false);
 
+	/* mixer scenes */
 	_mixer_scene_table.set_border_width(4);
 	_mixer_scene_table.set_spacings(4);
 	_mixer_scene_table.set_homogeneous(false);
@@ -358,6 +381,7 @@ Mixer_UI::Mixer_UI ()
 
 	add_sidebar_page (_("Tracks"), _("Track & Bus Visibility"), track_display_scroller);
 	add_sidebar_page (_("Groups"), _("Track & Bus Groups"), group_display_vbox);
+	add_sidebar_page (_("Strip FX"), _("Channel Strip / Track Templates"), strip_templates_vbox);
 
 	_sidebar_pager2.set_index (4);
 
@@ -409,6 +433,7 @@ Mixer_UI::Mixer_UI ()
 	group_display_scroller.show();
 	favorite_plugins_scroller.show();
 	group_display_vbox.show();
+	strip_templates_vbox.show();
 	favorite_plugins_vbox.show_all();
 	strip_packer.show();
 	inner_pane.show();
@@ -1054,7 +1079,7 @@ Mixer_UI::fan_out (std::weak_ptr<Route> wr, bool to_busses, bool group)
 		outputs = std::max (outputs, _session->master_out ()->n_inputs ().n_audio ());
 	}
 
-	route->output ()->disconnect (this);
+	route->output ()->disconnect ();
 	route->panner_shell ()->set_bypassed (true);
 
 	std::shared_ptr<AutomationControl> msac = route->master_send_enable_controllable ();
@@ -1075,7 +1100,7 @@ Mixer_UI::fan_out (std::weak_ptr<Route> wr, bool to_busses, bool group)
 					r = rl.front ();
 					assert (r);
 				} else {
-					list<std::shared_ptr<AudioTrack> > tl = _session->new_audio_track (busnames[bn], outputs, NULL, 1, bn, PresentationInfo::max_order, Normal, false);
+					AudioTrackList tl = _session->new_audio_track (busnames[bn], outputs, NULL, 1, bn, PresentationInfo::max_order, Normal, false);
 					r = tl.front ();
 					assert (r);
 
@@ -1320,6 +1345,7 @@ Mixer_UI::set_session (Session* sess)
 	}
 
 	refill_favorite_plugins();
+	strip_templates_changed ();
 
 	XMLNode* node = ARDOUR_UI::instance()->mixer_settings();
 	set_state (*node, 0);
@@ -1354,6 +1380,7 @@ Mixer_UI::set_session (Session* sess)
 
 	MixerScene::Change.connect (_session_connections, invalidator (*this), std::bind (&Mixer_UI::update_scene_buttons, this), gui_context());
 
+	Session::RouteTemplatesChanged.connect (*this, invalidator (*this), std::bind (&Mixer_UI::strip_templates_changed, this), gui_context());
 	Config->ParameterChanged.connect (*this, invalidator (*this), std::bind (&Mixer_UI::parameter_changed, this, _1), gui_context ());
 
 	route_groups_changed ();
@@ -2665,10 +2692,6 @@ Mixer_UI::set_state (const XMLNode& node, int version)
 		_sidebar_pager2.set_index (index);
 	}
 
-	if (node.get_property (X_("mixer-sidebar-btn2"), index)) {
-		_sidebar_pager2.set_index (index);
-	}
-
 	if (node.get_property (X_("mixer-plugin-list"), index) && index <= PLM_SearchAll) {
 		plugin_list_mode = (PluginListMode)index;
 	}
@@ -3496,10 +3519,10 @@ Mixer_UI::plugin_row_button_press (GdkEventButton *ev)
 				selection->unselect_all();
 				selection->select(path);
 			}
-		}
-		ARDOUR::PluginPresetPtr ppp = selected_plugin();
-		if (ppp) {
-			popup_note_context_menu (ev);
+			ARDOUR::PluginPresetPtr ppp = selected_plugin();
+			if (ppp) {
+				popup_note_context_menu (ev);
+			}
 		}
 	}
 	return false;
@@ -3708,6 +3731,162 @@ Mixer_UI::plugin_drop (const Glib::RefPtr<Gdk::DragContext>&, const Gtk::Selecti
 }
 
 void
+Mixer_UI::strip_templates_changed ()
+{
+	strip_template_model->clear ();
+
+	std::vector<TemplateInfo> templates;
+	find_route_templates (templates);
+	for (auto const& t : templates) {
+		TreeModel::Row row;
+		row = *(strip_template_model->append ());
+		row[strip_template_columns.name] = t.name;
+		row[strip_template_columns.path] = t.path;
+		row[strip_template_columns.desc] = t.description;
+	}
+}
+
+void
+Mixer_UI::strip_template_drag_data_get (Glib::RefPtr<Gdk::DragContext> const&, Gtk::SelectionData& data, guint, guint time)
+{
+	if (data.get_target () != "x-ardour/route.template") {
+		return;
+	}
+	Glib::RefPtr<Gtk::TreeView::Selection> selection = strip_template_display.get_selection();
+	Gtk::TreeModel::iterator iter;
+	if ((iter = selection->get_selected())) {
+		std::string path = (*iter)[strip_template_columns.path];
+		data.set (data.get_target(), path);
+	}
+}
+
+void
+Mixer_UI::strip_template_drag_begin (Glib::RefPtr<Gdk::DragContext> const& context)
+{
+	TreeView::Selection::ListHandle_Path rows = strip_template_display.get_selection ()->get_selected_rows ();
+	if (!rows.empty()) {
+		Glib::RefPtr< Gdk::Pixmap > pix = strip_template_display.create_row_drag_icon (*rows.begin ());
+
+		int w, h;
+		pix->get_size (w, h);
+		context->set_icon (pix->get_colormap (), pix, Glib::RefPtr<Gdk::Bitmap> (), 4, h / 2);
+	}
+}
+
+void
+Mixer_UI::strip_template_row_activated (const Gtk::TreeModel::Path& p, Gtk::TreeViewColumn*)
+{
+	TreeModel::iterator i = strip_template_model->get_iter (p);
+	if (!i) {
+		return;
+	}
+	apply_strip_template ((*i)[strip_template_columns.path]);
+}
+
+bool
+Mixer_UI::strip_template_row_button_press (GdkEventButton *ev)
+{
+	if ((ev->type != GDK_BUTTON_PRESS) || (ev->button != 3)) {
+		return false;
+	}
+	TreeModel::Path path;
+	TreeViewColumn* column;
+	int cellx, celly;
+	if (!strip_template_display.get_path_at_pos ((int)ev->x, (int)ev->y, path, column, cellx, celly)) {
+		return false;
+	}
+	Glib::RefPtr<Gtk::TreeView::Selection> selection = strip_template_display.get_selection();
+	if (selection) {
+		selection->unselect_all();
+		selection->select(path);
+	}
+	TreeModel::iterator i = strip_template_model->get_iter (path);
+	if (!i) {
+		return false;
+	}
+	std::string template_path = (*i)[strip_template_columns.path];
+
+	using namespace Gtk::Menu_Helpers;
+
+	Gtk::Menu* m = ARDOUR_UI::instance()->shared_popup_menu ();
+	MenuList& items = m->items ();
+	if (_selection.axes.empty()) {
+		items.push_back (MenuElem (_("No Track/Bus is selected.")));
+	} else {
+		items.push_back (MenuElem (_("Apply to Selected Strips"), sigc::bind (sigc::mem_fun (*this, &Mixer_UI::apply_strip_template), template_path)));
+	}
+
+	items.push_back (SeparatorElem());
+	items.push_back (MenuElem (_("Manage Templates"), []() { TemplateDialog td (1); td.run(); }));
+
+	m->popup (ev->button, ev->time);
+
+	return true;
+}
+
+void
+Mixer_UI::apply_strip_template (std::string const& path)
+{
+	if (!_session || _selection.axes.empty()) {
+		return;
+	}
+
+	XMLTree tree;
+	if (!tree.read (path)) {
+		error << string_compose (_("Could not understand state file \"%1\""), path) << endmsg;
+		return;
+	}
+	if (tree.root()->name() != X_("Route") ) {
+		error << string_compose (_("Invalid route template file \"%1\""), path) << endmsg;
+		return;
+	}
+
+	std::string name;
+	if (!tree.root()->get_property ("name", name)) {
+		error << string_compose (_("Route template file \"%1\" is unnamed"), path) << endmsg;
+		return;
+	}
+
+	if (_selection.axes.empty()) {
+		return;
+	}
+
+	if (0 == Config->instant_xml (X_("no-strip-template-warning"))) {
+		ArdourMessageDialog msg (string_compose (_("Apply Strip Template \"%1\" to selected track(s)?\n"
+		                                           "This operation cannot be undone."), name),
+		                         false, MESSAGE_QUESTION, BUTTONS_YES_NO);
+
+		msg.set_default_response (RESPONSE_YES);
+
+		VBox* vbox = msg.get_vbox();
+		HBox hbox;
+		CheckButton cb (_("Do not show this window again"));
+		hbox.pack_start (cb, true, false);
+		vbox->pack_start (hbox);
+		cb.show();
+		vbox->show();
+		hbox.show ();
+
+		if (msg.run () != RESPONSE_YES) {
+			return;
+		}
+
+		if (cb.get_active()) {
+			XMLNode node (X_("no-strip-template-warning"));
+			Config->add_instant_xml (node);
+		}
+	}
+
+	for (auto const* a : _selection.axes) {
+		std::shared_ptr<ARDOUR::Route> rt = std::dynamic_pointer_cast<ARDOUR::Route> (a->stripable());
+		if (!rt) {
+			continue;
+		}
+		rt->import_state (*tree.root(), false);
+	}
+}
+
+void
 Mixer_UI::do_vca_assign (std::shared_ptr<VCA> vca)
 {
 	/* call protected MixerActor:: method */
@@ -3791,14 +3970,17 @@ Mixer_UI::register_actions ()
 	RefPtr<Action> act;
 	if (!Profile->get_mixbus ()) {
 		act = ActionManager::register_toggle_action (group, "ToggleMixerList", _("Mixer: Show Sidebar List"), sigc::mem_fun (*this, &Tabbable::att_left_button_toggled));
+		act->set_tooltip (_("Show/Hide Left Panel"));
 		left_attachment_button.set_related_action (act);
 	} else {
 		act = ActionManager::register_toggle_action (group, "ToggleMixerList", _("Mixer: Show Sidebar List"), sigc::mem_fun (*this, &Tabbable::att_right_button_toggled));
+		act->set_tooltip (_("Show/Hide Right Panel"));
 		right_attachment_button.set_related_action (act);
 	}
 
 #ifdef MIXBUS
 	act = ActionManager::register_toggle_action (group, "ToggleMixerProps", _("Mixer: Show Properties Bottom"), sigc::mem_fun (*this, &Tabbable::att_bottom_button_toggled));
+	act->set_tooltip (_("Show/Hide Bottom Panel"));
 	bottom_attachment_button.set_related_action (act);
 #endif
 

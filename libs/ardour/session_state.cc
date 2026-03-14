@@ -66,7 +66,6 @@
 #include "pbd/strsplit.h"
 
 #include <glibmm.h>
-#include <glibmm/threads.h>
 #include <glibmm/fileutils.h>
 
 #include <boost/algorithm/string.hpp>
@@ -314,7 +313,7 @@ Session::post_engine_init ()
 		 * and IOChange are complete.
 		 */
 		{
-			Glib::Threads::Mutex::Lock lx (AudioEngine::instance()->process_lock ());
+			PBD::Mutex::Lock lx (AudioEngine::instance()->process_lock ());
 			ProcessorChangeBlocker pcb (this);
 			std::shared_ptr<RouteList const> r = routes.reader ();
 			for (auto const& i : *r) {
@@ -356,7 +355,7 @@ Session::post_engine_init ()
 		ControlProtocolManager::instance().midi_connectivity_established (true);
 
 		if (_is_new && !no_auto_connect()) {
-			Glib::Threads::Mutex::Lock lm (AudioEngine::instance()->process_lock());
+			PBD::Mutex::Lock lm (AudioEngine::instance()->process_lock());
 			auto_connect_master_bus ();
 		}
 
@@ -405,10 +404,12 @@ Session::post_engine_init ()
 	/* Can't do this until the trigger input MIDI port is set up */
 	TriggerBox::static_init (*this);
 
-	/* Now, finally, we can [ask the butler to] fill the playback buffers */
-
-	BootMessage (_("Filling playback buffers"));
-	request_locate (transport_sample(), true);
+	/* When loading, Session::session_loaded () will do this */
+	if (!loading ()) {
+		/* Now, finally, we can [ask the butler to] fill the playback buffers */
+		BootMessage (_("Filling playback buffers"));
+		request_locate (transport_sample(), true);
+	}
 
 	reset_xrun_count ();
 	return 0;
@@ -781,8 +782,8 @@ Session::save_state (string snapshot_name, bool pending, bool switch_to_snapshot
 
 	/* prevent concurrent saves from different threads */
 
-	Glib::Threads::Mutex::Lock lm (save_state_lock);
-	Glib::Threads::Mutex::Lock lx (save_source_lock, Glib::Threads::NOT_LOCK);
+	PBD::Mutex::Lock lm (save_state_lock);
+	PBD::Mutex::Lock lx (save_source_lock, PBD::Mutex::NotLock);
 	if (!for_archive) {
 		lx.acquire ();
 	}
@@ -1283,7 +1284,7 @@ Session::parse_route_state (const string& path, bool& match_pbd_id)
 }
 
 int
-Session::import_route_state (const string& path, std::map<PBD::ID, PBD::ID> const& idmap, RouteGroupImportMode rgim)
+Session::import_route_state (const string& path, std::map<PBD::ID, PBD::ID> const& idmap, RouteGroupImportMode rgim, Progress* progress)
 {
 	/* idmap:  <local route ID : extern/XML route ID>
 	 * a given route may only be set to the state of one extern ID,
@@ -1291,11 +1292,18 @@ Session::import_route_state (const string& path, std::map<PBD::ID, PBD::ID> cons
 	 */
 	XMLTree tree;
 	if (!tree.read (path)) {
-		error << string_compose (_("Could not understand state file \"%1\""),_path) << endmsg;
+		error << string_compose (_("Could not understand state file \"%1\""), path) << endmsg;
 		return -1;
 	}
 	if (tree.root()->name() != X_("RouteState") && tree.root()->name() != X_("Session")) { // XXX
 		return -2;
+	}
+
+	size_t completed      = 0;
+	size_t required_tasks = idmap.size () + 2;
+
+	if (progress) {
+		progress->set_progress (completed++ / (float)required_tasks);
 	}
 
 	int version = 0;
@@ -1345,6 +1353,14 @@ Session::import_route_state (const string& path, std::map<PBD::ID, PBD::ID> cons
 	if (xroutes) {
 		/* foreach route .. */
 		for (auto const rxml : xroutes->children()) {
+
+			if (progress) {
+				progress->set_progress (completed / (float)required_tasks);
+				if (progress->cancelled ()) {
+					break;
+				}
+			}
+
 			/* track-state includes version per route */
 			if (!rxml->get_property ("version", version) || version == 0) {
 				continue;
@@ -1356,6 +1372,13 @@ Session::import_route_state (const string& path, std::map<PBD::ID, PBD::ID> cons
 			for (auto [dst, src] : idmap) {
 				if (src != id) {
 					continue;
+				}
+
+				if (progress) {
+					progress->set_progress (completed++ / (float)required_tasks);
+					if (progress->cancelled ()) {
+						break;
+					}
 				}
 
 				XMLNode* pnode = rxml->child (PresentationInfo::state_node_name.c_str ());
@@ -1371,9 +1394,10 @@ Session::import_route_state (const string& path, std::map<PBD::ID, PBD::ID> cons
 				static const int special_pi = PresentationInfo::Mixbus | PresentationInfo::VBMAny;
 #endif
 
-				/* special case, new track from special routes */
+				/* special case, new bus from special routes */
 				if (!r && 0 != (pi.flags () & special_pi)) {
-					auto rl = new_audio_track (1, 2, 0, 1, "", PresentationInfo::max_order, Normal, true, false);
+					auto rl = new_audio_route (2, 2, 0, 1, "", PresentationInfo::AudioBus, PresentationInfo::max_order);
+
 					assert (rl.size () < 2);
 					if (rl.size () > 0) {
 						r = rl.front ();
@@ -1393,6 +1417,7 @@ Session::import_route_state (const string& path, std::map<PBD::ID, PBD::ID> cons
 					XMLNode copy (*rxml);
 					copy.remove_nodes_and_delete ("PresentationInfo"); // "Master"
 					copy.add_child_nocopy (pi.get_state());
+					copy.set_property (X_("definitely-add-number"), false);
 
 					RouteList rl = new_route_from_template (1, PresentationInfo::max_order, copy, "", NewPlaylist);
 					assert (rl.size () < 2);
@@ -1411,8 +1436,11 @@ Session::import_route_state (const string& path, std::map<PBD::ID, PBD::ID> cons
 							rg = route_group_by_name (route_groupname[src]);
 							break;
 						case CreateRouteGroup:
-							rg = new_route_group (route_groupname[src]);
-							add_route_group (rg);
+							rg = route_group_by_name (route_groupname[src]);
+							if (!rg) {
+								rg = new_route_group (route_groupname[src]);
+								add_route_group (rg);
+							}
 							break;
 					}
 					if (rg) {
@@ -1421,6 +1449,10 @@ Session::import_route_state (const string& path, std::map<PBD::ID, PBD::ID> cons
 				}
 			}
 		}
+	}
+
+	if (progress) {
+		progress->set_progress (completed++ / (float) required_tasks);
 	}
 
 	if (!new_track_order.empty ()) {
@@ -1441,6 +1473,10 @@ Session::import_route_state (const string& path, std::map<PBD::ID, PBD::ID> cons
 			r->set_presentation_order (n_routes + added++);
 		}
 		ensure_stripable_sort_order ();
+	}
+
+	if (progress) {
+		progress->set_progress (1.0);
 	}
 
 	return 0;
@@ -1606,7 +1642,7 @@ Session::state (bool save_template, snapshot_t snapshot_type, bool for_archive, 
 	child = node->add_child ("Sources");
 
 	if (!save_template) {
-		Glib::Threads::Mutex::Lock sl (source_lock);
+		PBD::Mutex::Lock sl (source_lock);
 
 		set<std::shared_ptr<Source> > sources_used_by_this_snapshot;
 
@@ -1665,7 +1701,7 @@ Session::state (bool save_template, snapshot_t snapshot_type, bool for_archive, 
 	child = node->add_child ("Regions");
 
 	if (!save_template) {
-		Glib::Threads::Mutex::Lock rl (region_lock);
+		PBD::Mutex::Lock rl (region_lock);
 
 		if (!only_used_assets) {
 			const RegionFactory::RegionMap& region_map (RegionFactory::all_regions());
@@ -1843,7 +1879,7 @@ Session::state (bool save_template, snapshot_t snapshot_type, bool for_archive, 
 	}
 
 	{
-		Glib::Threads::Mutex::Lock lm (lua_lock);
+		PBD::Mutex::Lock lm (lua_lock);
 		std::string saved;
 		{
 			luabridge::LuaRef savedstate ((*_lua_save)());
@@ -1863,7 +1899,7 @@ Session::state (bool save_template, snapshot_t snapshot_type, bool for_archive, 
 	}
 
 	{
-		Glib::Threads::RWLock::ReaderLock lm (_mixer_scenes_lock);
+		PBD::RWLock::ReaderLock lm (_mixer_scenes_lock);
 		uint64_t idx = 0;
 		uint64_t last = 0;
 		for (auto const& i : _mixer_scenes) {
@@ -2365,7 +2401,7 @@ Session::set_state (const XMLNode& node, int version)
 			gsize size;
 			guchar* buf = g_base64_decode ((*n)->content ().c_str (), &size);
 			try {
-				Glib::Threads::Mutex::Lock lm (lua_lock);
+				PBD::Mutex::Lock lm (lua_lock);
 				(*_lua_load)(std::string ((const char*)buf, size));
 			} catch (luabridge::LuaException const& e) {
 #ifndef NDEBUG
@@ -2378,7 +2414,7 @@ Session::set_state (const XMLNode& node, int version)
 	}
 
 	if ((child = find_named_node (node, "MixerScenes"))) {
-		Glib::Threads::RWLock::WriterLock lm (_mixer_scenes_lock);
+		PBD::RWLock::WriterLock lm (_mixer_scenes_lock);
 		uint64_t n_scenes = 0;
 		child->get_property("n_scenes", n_scenes);
 		_mixer_scenes.resize (n_scenes);
@@ -2403,7 +2439,7 @@ Session::set_state (const XMLNode& node, int version)
 				/* TODO Unknown I/O Plugin, retain state */
 			}
 		}
-		Glib::Threads::Mutex::Lock lm (AudioEngine::instance()->process_lock ());
+		PBD::Mutex::Lock lm (AudioEngine::instance()->process_lock ());
 		for (auto const& i : *iopl) {
 			i->ensure_io ();
 		}
@@ -2477,7 +2513,7 @@ Session::load_routes (const XMLNode& node, int version)
 		std::shared_ptr<MidiTrack> mt = std::dynamic_pointer_cast<MidiTrack> (*r);
 		bool is_midi_route = (*r)->n_inputs().n_midi() > 0 && (*r)->n_inputs().n_midi() > 0;
 		if (mt || is_midi_route) {
-			(*r)->output()->changed.connect_same_thread (*this, std::bind (&Session::midi_output_change_handler, this, _1, _2, std::weak_ptr<Route>(*r)));
+			(*r)->output()->changed.connect_same_thread (*this, std::bind (&Session::midi_output_change_handler, this, _1, std::weak_ptr<Route>(*r)));
 		}
 	}
 
@@ -2990,7 +3026,7 @@ Session::get_sources_as_xml ()
 
 {
 	XMLNode* node = new XMLNode (X_("Sources"));
-	Glib::Threads::Mutex::Lock lm (source_lock);
+	PBD::Mutex::Lock lm (source_lock);
 
 	for (SourceMap::const_iterator i = sources.begin(); i != sources.end(); ++i) {
 		node->add_child_nocopy (i->second->get_state());
@@ -3260,7 +3296,7 @@ Session::refresh_disk_space ()
 {
 #if __APPLE__ || __FreeBSD__ || __NetBSD__ || (HAVE_SYS_VFS_H && HAVE_SYS_STATVFS_H)
 
-	Glib::Threads::Mutex::Lock lm (space_lock);
+	PBD::Mutex::Lock lm (space_lock);
 
 	/* get freespace on every FS that is part of the session path */
 
@@ -3885,7 +3921,7 @@ Session::can_cleanup_peakfiles () const
 int
 Session::cleanup_peakfiles ()
 {
-	Glib::Threads::Mutex::Lock lm (peak_cleanup_lock, Glib::Threads::TRY_LOCK);
+	PBD::Mutex::Lock lm (peak_cleanup_lock, PBD::Mutex::TryLock);
 	if (!lm.locked()) {
 		return -1;
 	}
@@ -3925,6 +3961,19 @@ Session::cleanup_peakfiles ()
 	return 0;
 }
 
+void
+Session::close_all_sources ()
+{
+	/* this is mainly useful on Windows, sources are re-opened when needed */
+	PBD::Mutex::Lock lm (source_lock);
+	for (auto const& s : sources) {
+		std::shared_ptr<FileSource> fs = std::dynamic_pointer_cast<FileSource> (s.second);
+		if (fs) {
+			fs->close ();
+		}
+	}
+}
+
 int
 Session::cleanup_sources (CleanupReport& rep)
 {
@@ -3946,7 +3995,7 @@ Session::cleanup_sources (CleanupReport& rep)
 
 	_state_of_the_state = StateOfTheState (_state_of_the_state | InCleanup);
 
-	Glib::Threads::Mutex::Lock ls (source_lock, Glib::Threads::NOT_LOCK);
+	PBD::Mutex::Lock ls (source_lock, PBD::Mutex::NotLock);
 
 	/* this is mostly for windows which doesn't allow file
 	 * renaming if the file is in use. But we don't special
@@ -4325,14 +4374,14 @@ Session::add_controllable (std::shared_ptr<Controllable> c)
 	   as part of the session.
 	*/
 
-	Glib::Threads::Mutex::Lock lm (controllables_lock);
+	PBD::Mutex::Lock lm (controllables_lock);
 	controllables.insert (c);
 }
 
 std::shared_ptr<Controllable>
 Session::controllable_by_id (const PBD::ID& id)
 {
-	Glib::Threads::Mutex::Lock lm (controllables_lock);
+	PBD::Mutex::Lock lm (controllables_lock);
 
 	for (Controllables::iterator i = controllables.begin(); i != controllables.end(); ++i) {
 		if ((*i)->id() == id) {
@@ -4458,21 +4507,37 @@ Session::restore_history (string snapshot_name)
 			XMLNode *t = *it;
 
 			std::string name;
+			std::string timestamp;
+
 			int64_t tv_sec;
 			int64_t tv_usec;
+			Glib::DateTime dt;
 
-			if (!t->get_property ("name", name) || !t->get_property ("tv-sec", tv_sec) ||
-			    !t->get_property ("tv-usec", tv_usec)) {
+			if (!t->get_property ("name", name)) {
+				continue;
+			}
+
+			/* new since 9.3 timestamp */
+			if (t->get_property ("timestamp", timestamp)) {
+#if 0 // glibmm >= 2.62
+				dt = Glib::DateTime::create_from_iso8601 (timestamp);
+#else
+				dt = Glib::DateTime (g_date_time_new_from_iso8601 (timestamp.c_str(), NULL));
+#endif
+			} else if (t->get_property ("tv-sec", tv_sec) && t->get_property ("tv-usec", tv_usec)) {
+#if 0 // glibmm >= 2.80
+				dt.create_from_utc_usec (tv_sec * 1e6 + tv_usec);
+#else
+				dt = Glib::DateTime::create_now_local (tv_sec);
+				dt.add_seconds (tv_usec / 1e6);
+#endif
+			} else {
 				continue;
 			}
 
 			UndoTransaction* ut = new UndoTransaction ();
 			ut->set_name (name);
-
-			struct timeval tv;
-			tv.tv_sec = tv_sec;
-			tv.tv_usec = tv_usec;
-			ut->set_timestamp(tv);
+			ut->set_timestamp (dt);
 
 			for (XMLNodeConstIterator child_it  = t->children().begin();
 			     child_it != t->children().end(); child_it++)
@@ -5295,7 +5360,7 @@ Session::bring_all_sources_into_session (std::function<void(uint32_t,uint32_t,st
 
 	{
 
-		Glib::Threads::Mutex::Lock lm (source_lock);
+		PBD::Mutex::Lock lm (source_lock);
 
 		for (SourceMap::const_iterator i = sources.begin(); i != sources.end(); ++i) {
 			std::shared_ptr<FileSource> fs = std::dynamic_pointer_cast<FileSource> (i->second);
@@ -5854,7 +5919,7 @@ Session::archive_session (const std::string& dest,
 
 	/* We are going to temporarily change some source properties,
 	 * don't allow any concurrent saves (periodic or otherwise */
-	Glib::Threads::Mutex::Lock lm (save_source_lock);
+	PBD::Mutex::Lock lm (save_source_lock);
 
 	disable_record (false);
 
@@ -5941,7 +6006,7 @@ Session::archive_session (const std::string& dest,
 	 */
 	size_t total_size = 0;
 	{
-		Glib::Threads::Mutex::Lock lm (source_lock);
+		PBD::Mutex::Lock lm (source_lock);
 
 		/* build a list of used names */
 		std::set<std::string> audio_file_names;
@@ -6035,7 +6100,7 @@ Session::archive_session (const std::string& dest,
 			progress->set_progress (0);
 		}
 
-		Glib::Threads::Mutex::Lock lm (source_lock);
+		PBD::Mutex::Lock lm (source_lock);
 		for (SourceMap::const_iterator i = sources.begin(); i != sources.end(); ++i) {
 			if (std::dynamic_pointer_cast<SilentFileSource> (i->second)) {
 				continue;

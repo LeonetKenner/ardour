@@ -190,14 +190,17 @@ Editor::register_actions ()
 
 	show_editor_list_action = ActionManager::register_toggle_action (editor_actions, "show-editor-list", _("Show Editor List"), sigc::mem_fun (*this, &Tabbable::att_right_button_toggled));
 	ActionManager::session_sensitive_actions.push_back (show_editor_list_action);
+	show_editor_list_action->set_tooltip (_("Show/Hide Right Panel"));
 	right_attachment_button.set_related_action (show_editor_list_action);
 
 	show_editor_mixer_action = ActionManager::register_toggle_action (editor_actions, "show-editor-mixer", _("Show Editor Mixer"), sigc::mem_fun (*this, &Tabbable::att_left_button_toggled));
 	ActionManager::session_sensitive_actions.push_back (show_editor_mixer_action);
+	show_editor_mixer_action->set_tooltip (_("Show/Hide Left Panel"));
 	left_attachment_button.set_related_action (show_editor_mixer_action);
 
 	show_editor_props_action = ActionManager::register_toggle_action (editor_actions, "show-editor-props", _("Show Editor Properties Box"), sigc::mem_fun (*this, &Tabbable::att_bottom_button_toggled));
 	ActionManager::session_sensitive_actions.push_back (show_editor_props_action);
+	show_editor_props_action->set_tooltip (_("Show/Hide Bottom Panel"));
 	bottom_attachment_button.set_related_action (show_editor_props_action);
 
 	reg_sens (editor_actions, "playhead-to-next-region-boundary", _("Playhead to Next Region Boundary"), sigc::bind (sigc::mem_fun(*this, &Editor::cursor_to_next_region_boundary), true));
@@ -935,11 +938,9 @@ Editor::toggle_skip_playback ()
 void
 Editor::toggle_ruler_visibility ()
 {
-	if (no_ruler_shown_update) {
+	if (no_ruler_shown_update || !_session) {
 		return;
 	}
-
-	assert (_session);
 
 	update_ruler_visibility ();
 	store_ruler_visibility ();

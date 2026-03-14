@@ -19,8 +19,9 @@
 #ifndef __CANVAS_DEBUG_H__
 #define __CANVAS_DEBUG_H__
 
-#include <sys/time.h>
+#include <cstdint>
 #include <map>
+
 #include "pbd/debug.h"
 
 #include "canvas/visibility.h"
@@ -45,8 +46,8 @@ namespace PBD {
 #endif
 
 namespace ArdourCanvas {
-	LIBCANVAS_API extern struct timeval epoch;
-	LIBCANVAS_API extern std::map<std::string, struct timeval> last_time;
+	LIBCANVAS_API extern int64_t epoch;
+	LIBCANVAS_API extern std::map<std::string, int64_t> last_time;
 	LIBCANVAS_API extern void checkpoint (std::string, std::string);
 	LIBCANVAS_API extern void set_epoch ();
 	LIBCANVAS_API extern const char* event_type_string (int event_type);

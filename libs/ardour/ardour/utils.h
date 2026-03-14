@@ -35,6 +35,11 @@
 #include <CoreFoundation/CoreFoundation.h>
 #endif /* __APPLE__ */
 
+#if defined(COMPILER_MSVC) && defined(WAF_BUILD)
+#include <basetsd.h>
+typedef SSIZE_T ssize_t;
+#endif
+
 #include "ardour/ardour.h"
 #include "ardour/data_type.h"
 #include "ardour/dB.h"
@@ -118,6 +123,8 @@ LIBARDOUR_API uint32_t how_many_dsp_threads ();
 LIBARDOUR_API uint32_t how_many_io_threads ();
 
 LIBARDOUR_API std::string compute_sha1_of_file (std::string path);
+
+LIBARDOUR_API std::string maybe_clean_pipewire_midi_port_name (std::string pn);
 
 template<typename T> std::shared_ptr<AutomationControlList> route_list_to_control_list (std::shared_ptr<RouteList const> rl, std::shared_ptr<T> (Stripable::*get_control)() const) {
 	std::shared_ptr<AutomationControlList> cl (new AutomationControlList);
