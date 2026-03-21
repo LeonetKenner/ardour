@@ -21,9 +21,11 @@
  */
 
 #if defined(COMPILER_MSVC) && defined(WAF_BUILD)
+/* Both defines are needed to avoid errors, regardless of WIN32_LEAN_AND_MEAN. */
 #define NOMINMAX
 #define LIBARDOUR_DLL_EXPORTS
-/* Both defines are needed to avoid errors, regardless of WIN32_LEAN_AND_MEAN. */
+
+#include <winsock2.h>
 #endif
 
 #include <glibmm.h>
@@ -989,9 +991,9 @@ LuaBindings::common (lua_State* L)
 
 		.beginClass <Temporal::Range> ("Range")
 		.addConstructor <void (*) (Temporal::timepos_t, Temporal::timepos_t)> ()
-		.addFunction ("start", &Temporal::Range::start)
+		.addFunction ("start", static_cast<timepos_t (Temporal::Range::*)() const>(&Temporal::Range::start))
 		/* "end is a reserved Lua word */
-		.addFunction ("_end", &Temporal::Range::end)
+		.addFunction ("_end", static_cast<timepos_t (Temporal::Range::*)() const>(&Temporal::Range::end))
 		.endClass ()
 
 		.deriveWSPtrClass <Evoral::Sequence<Temporal::Beats>, Evoral::ControlSet> ("Sequence")
@@ -1169,8 +1171,8 @@ LuaBindings::common (lua_State* L)
 		.addConstructor <void (*) (Temporal::timepos_t, Temporal::timepos_t, uint32_t)> ()
 		.addFunction ("length", &TimelineRange::length)
 		.addFunction ("equal", &TimelineRange::equal)
-		.addFunction ("start", &TimelineRange::start)
-		.addFunction ("_end", &TimelineRange::end) // XXX "end" is a lua reserved word
+		.addFunction ("start", static_cast<timepos_t (TimelineRange::*)() const>(&TimelineRange::start))
+		.addFunction ("_end", static_cast<timepos_t (TimelineRange::*)() const>(&TimelineRange::end)) // XXX "end" is a lua reserved word
 		.addData ("id", &TimelineRange::id)
 		.endClass ()
 
@@ -3580,6 +3582,7 @@ LuaBindings::non_rt (lua_State* L)
 		.addFunction ("new_midi_track", &Session::new_midi_track)
 		.addFunction ("new_midi_route", &Session::new_midi_route)
 		.addFunction ("new_route_group", &Session::new_route_group)
+		.addFunction ("add_route_group", &Session::add_route_group)
 		.addFunction ("add_master_bus", &Session::add_master_bus)
 		.endClass ()
 

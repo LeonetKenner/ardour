@@ -1709,7 +1709,7 @@ RegionMoveDrag::finished (GdkEvent* ev, bool movement_occurred)
 		changed_tracks = true;
 	} else {
 		if (_views.front ().time_axis_view < 0) {
-#warning paul fix this code
+#pragma GCC warning "paul fix this code"
 			/* XXX this test is nonsensical. See  0aef128207 and
 			   #8672 for the origin of this and related code
 			*/
@@ -1987,14 +1987,15 @@ RegionMoveDrag::finished_no_copy (
 
 		if (changed_position && !_x_constrained) {
 			where = rv->region ()->position ().earlier (drag_delta);
+			where.set_time_domain (_last_position.time_domain ());
 		} else {
 			where = rv->region ()->position ();
 		}
 
 		/* compute full extent of regions that we're going to insert */
 
-		if (rv->region ()->position () < extent_min) {
-			extent_min = rv->region ()->position ();
+		if (where < extent_min) {
+			extent_min = where;
 		}
 
 		if (changed_tracks) {
@@ -6268,7 +6269,7 @@ NoteDrag::total_dy () const
 
 	/* clamp y to the view-relative vertical boundaries of the view */
 	int o = _view->midi_context().y_position ();
-	int y = std::max (0, (std::min ((int) current_pointer_y(), o + _view->midi_context().contents_height() - _view->note_height())));
+	int y = std::max (o, (std::min ((int) current_pointer_y(), o + _view->midi_context().contents_height())));
 
 	/* and work out delta */
 	return _view->y_to_note (y - o) - _view->y_to_note (grab_y () - o);

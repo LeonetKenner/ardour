@@ -710,52 +710,26 @@ MidiView::scroll (GdkEventScroll* ev)
 	}
 
 	if (_selection.empty()) {
-		const int step = 1;
-		const bool zoom = Keyboard::modifier_state_equals (ev->state, Keyboard::SecondaryModifier);
-		const bool just_one_edge = Keyboard::modifier_state_equals (ev->state, Keyboard::SecondaryModifier|Keyboard::PrimaryModifier);
 
 		switch (ev->direction) {
 		case GDK_SCROLL_UP:
-			if (just_one_edge) {
-				/* make higher notes visible aka expand higher pitch range */
-				set_note_range (_midi_context.lowest_note(), min (127, _midi_context.highest_note() + step));
-			} else if (zoom) {
-				/* zoom out to show more higher and lower pitches */
-				set_note_range (max (0, _midi_context.lowest_note() - step), min (127, _midi_context.highest_note() + step));
-			} else {
-				/* scroll towards higher pitches */
-				set_note_range (max (0, _midi_context.lowest_note() + step), min (127, _midi_context.highest_note() + step));
-			}
-			return true;
-
 		case GDK_SCROLL_DOWN:
-			if (just_one_edge) {
-				/* make lower notes visible aka expand lower pitch range */
-				set_note_range (max (0, _midi_context.lowest_note() - step), _midi_context.highest_note());
-			} else if (zoom) {
-				/* zoom in to show less higher and lower pitches */
-				set_note_range (min (127, _midi_context.lowest_note() + step), max (0, _midi_context.highest_note() - step));
-			} else {
-				/* scroll towards lower pitches */
-				set_note_range (min (127, _midi_context.lowest_note() - step), max (0, _midi_context.highest_note() - step));
-			}
-			return true;
-
+            /* pass scroll event to midi context for vertial move/zoom */
+            if (_midi_context.scroll(ev)) {
+                 return true;
+            }
 		case GDK_SCROLL_LEFT:
 			_editing_context.set_horizontal_position (_editing_context.horizontal_position() - 20.0);
 			return true;
 			break;
-
 		case GDK_SCROLL_RIGHT:
 			_editing_context.set_horizontal_position (_editing_context.horizontal_position() + 20.0);
 			return true;
 			break;
-
 		default:
-			break;
+			return false;
 		}
 
-		return false;
 	}
 
 	hide_verbose_cursor ();
@@ -903,7 +877,7 @@ MidiView::create_note_at (timepos_t const & source_relative_start, double y, Tem
 
 	Temporal::Beats t = source_relative_start.beats();
 
-	const int  note     = y_to_note(y);
+	const int  note        = y_to_note(y);
 	const uint8_t chan     = get_channel_for_add (t);
 	const uint8_t velocity = get_velocity_for_add (t);
 
@@ -1848,8 +1822,7 @@ MidiView::note_in_region_range (const std::shared_ptr<NoteType> note, bool& visi
 	const std::shared_ptr<ARDOUR::MidiRegion> midi_reg = midi_region();
 
 	const bool outside = !note_in_region_time_range (note);
-	const int y = _midi_context.note_to_y (note->note());
-	visible =  (y >= 0) && (y <= _midi_context.contents_height());
+	visible = _midi_context.note_visible(note->note());
 
 	return !outside;
 }
@@ -3181,10 +3154,8 @@ MidiView::note_dropped (NoteBase *, timecnt_t const & d_qn, int8_t dnote, bool c
 	_editing_context.commit_reversible_command ();
 
 	// care about notes being moved beyond the upper/lower bounds on the canvas
-	if (lowest_note_in_selection  < _midi_context.lowest_note() ||
-	    highest_note_in_selection > _midi_context.highest_note()) {
-		_midi_context.set_note_visibility_range_style (MidiStreamView::ContentsRange);
-	}
+	_midi_context.maybe_extend_note_range (lowest_note_in_selection);
+	_midi_context.maybe_extend_note_range (highest_note_in_selection);
 }
 
 /** @param x Pixel relative to the region position.
@@ -3990,10 +3961,8 @@ MidiView::transpose (bool up, bool fine, bool allow_smush)
 
 	apply_note_diff ();
 
-	if (lowest < _midi_context.lowest_note() || highest > _midi_context.highest_note()) {
-		_midi_context.maybe_extend_note_range (lowest);
-		_midi_context.maybe_extend_note_range (highest);
-	}
+	_midi_context.maybe_extend_note_range (lowest);
+	_midi_context.maybe_extend_note_range (highest);
 
 	if (!_no_sound_notes && UIConfiguration::instance().get_sound_midi_notes()) {
 		if (_selection.size() == 1) {
@@ -4834,8 +4803,7 @@ MidiView::clip_data_recorded (samplecnt_t total_duration)
 
 			}
 
-			const int y = _midi_context.note_to_y (note->note());
-			bool visible =  (y >= 0) && (y <= _midi_context.contents_height());
+			bool visible = _midi_context.note_visible(note->note());
 
 			NoteBase* nb = add_note (note, visible);
 			nb->item()->set_fill_color (UIConfiguration::instance().color ("recording note"));
@@ -4938,8 +4906,7 @@ MidiView::data_recorded (std::weak_ptr<MidiSource> w)
 
 			}
 
-			const int y = _midi_context.note_to_y (note->note());
-			bool visible =  (y >= 0) && (y <= _midi_context.contents_height());
+			bool visible = _midi_context.note_visible(note->note());
 
 			NoteBase* nb = add_note (note, visible);
 			nb->item()->set_fill_color (UIConfiguration::instance().color ("recording note"));

@@ -944,6 +944,35 @@ ArdourButton::set_colors ()
 	led_inactive_color = inactive.color ();
 }
 
+
+/**
+ * This computes a contrasting text color aginst a background color.
+ * A theme-defined modifier allows setting the minimum contrast delta that should
+ * trigger a color inversion.
+ */
+uint32_t
+ArdourButton::get_contrasting_color (const uint32_t background_color)
+{
+
+	if (!(_elements & Body)) {
+		/* Buttons without a background don't need to invert their text color */
+		return UIConfigurationBase::instance().color ("gtk_foreground");
+	}
+
+	double normal_contrast = abs(Gtkmm2ext::color_to_luminance(UIConfigurationBase::instance().color ("gtk_foreground")) - Gtkmm2ext::color_to_luminance(background_color));
+	double invert_contrast = abs(Gtkmm2ext::color_to_luminance(UIConfigurationBase::instance().color ("gtk_background")) - Gtkmm2ext::color_to_luminance(background_color));
+
+	/* Adjust the contrast gain needed to invert the text color
+	 * Vector icons suffer less from legitibility issues
+	 */
+	double constrast_threshold = _elements & VectorIcon ? 0.35 : 0.0;
+
+	return normal_contrast + constrast_threshold > invert_contrast ?
+		UIConfigurationBase::instance().color ("gtk_foreground"):
+		UIConfigurationBase::instance().color ("gtk_background");
+}
+
+
 /**
  * This sets the colors used for rendering based on two fixed values, rather
  * than basing them on the button name, and thus information in the GUI config
@@ -961,20 +990,7 @@ void ArdourButton::set_active_color (const uint32_t color)
 
 	fill_active_color = color;
 
-	unsigned char r, g, b, a;
-	UINT_TO_RGBA(color, &r, &g, &b, &a);
-
-	double white_contrast = (max (double(r), 255.) - min (double(r), 255.)) +
-		(max (double(g), 255.) - min (double(g), 255.)) +
-		(max (double(b), 255.) - min (double(b), 255.));
-
-	double black_contrast = (max (double(r), 0.) - min (double(r), 0.)) +
-		(max (double(g), 0.) - min (double(g), 0.)) +
-		(max (double(b), 0.) - min (double(b), 0.));
-
-	text_active_color = (white_contrast > black_contrast) ?
-		UIConfigurationBase::instance().color ("gtk_foreground") : /* nomimally white */
-		UIConfigurationBase::instance().color ("gtk_background");  /* nomimally black */
+	text_active_color = get_contrasting_color(color);
 
 	/* XXX what about led colors ? */
 	CairoWidget::set_dirty ();
@@ -986,20 +1002,7 @@ void ArdourButton::set_inactive_color (const uint32_t color)
 
 	fill_inactive_color = color;
 
-	unsigned char r, g, b, a;
-	UINT_TO_RGBA(color, &r, &g, &b, &a);
-
-	double white_contrast = (max (double(r), 255.) - min (double(r), 255.)) +
-		(max (double(g), 255.) - min (double(g), 255.)) +
-		(max (double(b), 255.) - min (double(b), 255.));
-
-	double black_contrast = (max (double(r), 0.) - min (double(r), 0.)) +
-		(max (double(g), 0.) - min (double(g), 0.)) +
-		(max (double(b), 0.) - min (double(b), 0.));
-
-	text_inactive_color = (white_contrast > black_contrast) ?
-		UIConfigurationBase::instance().color ("gtk_foreground") : /* nominally white */
-		UIConfigurationBase::instance().color ("gtk_background");  /* nominally black */
+	text_inactive_color = get_contrasting_color(color);
 
 	/* XXX what about led colors ? */
 	CairoWidget::set_dirty ();
