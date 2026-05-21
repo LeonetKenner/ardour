@@ -642,14 +642,25 @@ GtkCanvas::pick_current_item (Duple const & point, int state)
 
 		if (within_items.front() == _current_item) {
 			/* uppermost item at point is already _current_item */
-			DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("CURRENT ITEM remains %1/%2\n", _current_item->whatami(), _current_item->name));
+			DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("CURRENT ITEM remains %1 @ %2\n", _current_item->whoami(), _current_item));
 			return;
 		}
 
 		_new_current_item = const_cast<Item*> (within_items.front());
 
 		if (_new_current_item != _current_item) {
+#ifndef NDEBUG
+			if (_current_item) {
+				DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("CHOSE NEW ITEM, deliver event  %1 was %2\n", _new_current_item->whoami(), _current_item->whoami()));
+			} else {
+				DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("CHOSE NEW ITEM, deliver event  %1 was null\n", _new_current_item->whoami()));
+			}
+#endif
 			deliver_enter_leave (point, state);
+		} else {
+#ifndef NDEBUG
+			DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("CHOSE NEW ITEM somehow it remains %1/%2\n", _current_item->whatami(), _current_item->name));
+#endif
 		}
 	}
 
@@ -823,7 +834,7 @@ GtkCanvas::deliver_enter_leave (Duple const & point, int state)
 	if (_current_item && !_current_item->ignore_events ()) {
 		leave_event.detail = leave_detail;
 		_current_item->Event ((GdkEvent*)&leave_event);
-		DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("LEAVE %1/%2\n", _current_item->whatami(), _current_item->name));
+		DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("LEAVE %1 @ %2\n", _current_item->whoami(), _current_item));
 	}
 
 	if (_current_item == current_tooltip_item) {
@@ -835,27 +846,33 @@ GtkCanvas::deliver_enter_leave (Duple const & point, int state)
 
 	for (vector<Item*>::iterator it = items_to_leave_virtual.begin(); it != items_to_leave_virtual.end(); ++it) {
 		if (!(*it)->ignore_events()) {
-			DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("leave %1/%2\n", (*it)->whatami(), (*it)->name));
+			DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("leave %1 @ %2\n", (*it)->whoami(), (*it)));
 			(*it)->Event ((GdkEvent*)&leave_event);
 		}
 	}
 
 	for (vector<Item*>::iterator it = items_to_enter_virtual.begin(); it != items_to_enter_virtual.end(); ++it) {
 		if (!(*it)->ignore_events()) {
-			DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("enter %1/%2\n", (*it)->whatami(), (*it)->name));
+			DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("enter %1 @ %2\n", (*it)->whoami(), (*it)));
 			(*it)->Event ((GdkEvent*)&enter_event);
-			// std::cerr << "enter " << (*it)->whatami() << '/' << (*it)->name << std::endl;
 		}
 	}
 
 	if (_new_current_item && !_new_current_item->ignore_events()) {
 		enter_event.detail = enter_detail;
-		DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("ENTER %1/%2\n", _new_current_item->whatami(), _new_current_item->name));
+		DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("ENTER %1 @ %2\n", _new_current_item->whoami(), _new_current_item));
 		start_tooltip_timeout (_new_current_item);
 		_new_current_item->Event ((GdkEvent*)&enter_event);
 	}
 
 	_current_item = _new_current_item;
+#ifndef NDEBUG
+	if (_current_item) {
+		DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, string_compose ("... set current item to %1 @ %2\n", _current_item->whoami(), _current_item));
+	} else {
+		DEBUG_TRACE (PBD::DEBUG::CanvasEnterLeave, "... current item set to null\n");
+	}
+#endif
 }
 
 

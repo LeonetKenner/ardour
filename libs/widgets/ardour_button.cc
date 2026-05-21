@@ -29,6 +29,10 @@
 #include "pbd/error.h"
 #include "pbd/unwind.h"
 
+#if defined COMPILER_MSVC && defined WAF_BUILD
+#define NOMINMAX
+#endif
+
 #include "gtkmm2ext/colors.h"
 #include "gtkmm2ext/gui_thread.h"
 #include "gtkmm2ext/rgb_macros.h"
@@ -211,6 +215,16 @@ ArdourButton::set_text_internal () {
 	} else {
 		_layout->set_text (_text);
 	}
+	/* automatic, or use a special _tweak?
+	 *
+	 * Let's do this automatically for now,
+	 * since it's simpler.
+	 */
+	if (_text.find ("\n") != string::npos) {
+		_layout->set_alignment (Pango::ALIGN_CENTER);
+	} else {
+		_layout->set_alignment (Pango::ALIGN_LEFT);
+	}
 }
 
 void
@@ -307,8 +321,8 @@ ArdourButton::render (Cairo::RefPtr<Cairo::Context> const& ctx, cairo_rectangle_
 	if (corner_radius < 0) {
 		/* L/R half circle */
 		corner_radius = get_height() / 2. - 2 * scale;
-	} else {
-		std::max(2.f, corner_radius * scale);
+	} else if (corner_radius > 0) {
+		corner_radius = std::max(2.f, corner_radius * scale);
 	}
 	corner_radius = boxy ? 0 : corner_radius;
 
@@ -382,10 +396,10 @@ ArdourButton::render (Cairo::RefPtr<Cairo::Context> const& ctx, cairo_rectangle_
 		Gtkmm2ext::set_source_rgba (cr, outline_color);
 		cairo_fill(cr);
 
-		padding_top = 1 * scale;
-		padding_bottom = 1 * scale;
-		padding_left = 1 * scale;
-		padding_right = 1 * scale;
+		padding_top = 1 * std::max (1.f, scale);
+		padding_bottom = 1 * std::max (1.f, scale);
+		padding_left = 1 * std::max (1.f, scale);
+		padding_right = 1 * std::max (1.f, scale);
 
 		if (_border_mask != HIDE_NONE) {
 			if (_border_mask & HIDE_TOP) {
@@ -443,6 +457,12 @@ ArdourButton::render (Cairo::RefPtr<Cairo::Context> const& ctx, cairo_rectangle_
 			rounded_function (cr, padding_left, padding_top, get_width() - (padding_left + padding_right), get_height() - (padding_top + padding_bottom), corner_radius);
 			cairo_fill (cr);
 		}
+	}
+
+	if (padding_left != padding_right || padding_top != padding_bottom) {
+		/* Adjust content centering when some borders are hidden */
+		cairo_save (cr);
+		cairo_translate (cr, (double)(padding_left - padding_right) / 2.,  (double)(padding_top - padding_bottom) / 2.);
 	}
 
 	const int text_margin = char_pixel_width();
@@ -682,6 +702,10 @@ ArdourButton::render (Cairo::RefPtr<Cairo::Context> const& ctx, cairo_rectangle_
 		cairo_arc (cr, 0, 0, _diameter * .5 - 3 * scale, 0, 2 * M_PI);
 		cairo_fill(cr);
 
+		cairo_restore (cr);
+	}
+
+	if (padding_left != padding_right || padding_top != padding_bottom) {
 		cairo_restore (cr);
 	}
 

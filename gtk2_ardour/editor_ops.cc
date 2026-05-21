@@ -92,6 +92,7 @@
 #include "audio_time_axis.h"
 #include "automation_line.h"
 #include "automation_time_axis.h"
+#include "chord_box.h"
 #include "control_point.h"
 #include "debug.h"
 #include "editing.h"
@@ -106,6 +107,7 @@
 #include "interthread_progress_window.h"
 #include "item_counts.h"
 #include "keyboard.h"
+#include "midi_inspector.h"
 #include "midi_region_view.h"
 #include "mixer_ui.h"
 #include "mixer_strip.h"
@@ -114,6 +116,7 @@
 #include "paste_context.h"
 #include "patch_change_dialog.h"
 #include "pianoroll_window.h"
+#include "quantize_dialog.h"
 #include "region_gain_line.h"
 #include "route_time_axis.h"
 #include "selection.h"
@@ -9525,7 +9528,21 @@ Editor::temporal_zoom_extents ()
 void
 Editor::edit_region_in_dedicated_window ()
 {
-	selection->foreach_regionview (&RegionView::show_region_editor);
+	AudioRegionView* arv = nullptr;
+
+	for (auto & r : selection->regions) {
+		if (!arv && (arv = dynamic_cast<AudioRegionView*> (r))) {
+			break;
+		}
+		if (dynamic_cast<MidiRegionView*> (r)) {
+			pianoroll_edit ();
+			return;
+		}
+	}
+
+	if (arv) {
+		arv->show_region_editor ();
+	}
 }
 
 void
@@ -9587,4 +9604,59 @@ Editor::find_and_display_track ()
 	if (stv) {
 		ensure_time_axis_view_is_visible (*stv, true);
 	}
+}
+
+void
+Editor::replace_chord (std::vector<int> intervals)
+{
+	for (auto & rv : selection->regions) {
+		MidiRegionView* mrv = dynamic_cast<MidiRegionView*> (rv);
+		if (mrv) {
+			mrv->replace_chord (intervals);
+		}
+	}
+}
+
+void
+Editor::invert_selected_chord (bool up)
+{
+	for (auto & rv : selection->regions) {
+		MidiRegionView* mrv = dynamic_cast<MidiRegionView*> (rv);
+		if (mrv) {
+			mrv->invert_selected_chord (up);
+		}
+	}
+}
+
+void
+Editor::drop_selected_chord (std::vector<int> which_notes)
+{
+	for (auto & rv : selection->regions) {
+		MidiRegionView* mrv = dynamic_cast<MidiRegionView*> (rv);
+		if (mrv) {
+			mrv->drop_selected_chord (which_notes);
+		}
+	}
+}
+
+bool
+Editor::get_midi_chord (int root_pitch, std::vector<int>& pitches) const
+{
+	return _midi_inspector->chord_box->get_midi_chord (root_pitch, pitches);
+}
+
+Quantize*
+Editor::get_quantize_op ()
+{
+	EC_LOCAL_TEMPO_SCOPE;
+
+	QuantizeWidget* qw (_midi_inspector->quantize_widget);
+
+	return new Quantize (qw->snap_start(),
+	                     qw->snap_end(),
+	                     qw->start_grid_size(),
+	                     qw->end_grid_size(),
+	                     qw->strength(),
+	                     qw->swing(),
+	                     qw->threshold());
 }

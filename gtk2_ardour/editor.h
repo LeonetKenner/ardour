@@ -71,6 +71,7 @@
 #include "editing.h"
 #include "enums.h"
 #include "editor_items.h"
+#include "midi_selection.h"
 #include "region_selection.h"
 #include "selection_memento.h"
 #include "trigger_clip_picker.h"
@@ -131,6 +132,7 @@ class ArdourMarker;
 class MidiRegionView;
 class MidiView;
 class MidiExportDialog;
+class MidiInspector;
 class MixerStrip;
 class MouseCursors;
 class NoteBase;
@@ -493,6 +495,8 @@ public:
 	void temporal_zoom_extents ();
 
 	void find_and_display_track ();
+
+	void toggle_main ();
 
 protected:
 	void map_transport_state ();
@@ -1004,8 +1008,8 @@ private:
 		DOWN
 	};
 
-	bool scroll_press (Direction);
-	void scroll_release ();
+	bool scroll_press (GdkEventButton* ev, Direction);
+	bool scroll_release (GdkEventButton* ev);
 	sigc::connection _scroll_connection;
 	int _scroll_callbacks;
 
@@ -1568,6 +1572,12 @@ private:
 	void set_visible_marker_types (MarkerBarType);
 	void set_visible_range_types (RangeBarType);
 	void maybe_show_instrument_plugin (std::shared_ptr<ARDOUR::MidiTrack> mt);
+
+	void replace_chord (std::vector<int> intervals);
+	void invert_selected_chord (bool up);
+	void drop_selected_chord (std::vector<int> which_notes);
+	bool get_midi_chord (int root_pitch, std::vector<int>& pitches) const;
+	void midi_view_selection_changed (SimpleMidiNoteSelection& selection);
 
 protected:
 	void _commit_tempo_map_edit (Temporal::TempoMap::WritableSharedPtr&, bool with_update = false);
@@ -2138,6 +2148,7 @@ private:
 	bool _pending_initial_locate;
 
 	Gtk::HBox _summary_hbox;
+	Gtk::VBox _summary_vbox;
 	EditorSummary* _summary;
 
 	void region_view_added (RegionView*);
@@ -2278,6 +2289,11 @@ private:
 	std::map<Editing::GridType,Glib::RefPtr<Gtk::RadioAction> > quantization_actions;
 	void global_quantization_chosen (Editing::GridType);
 	bool bbt_to_grid (Temporal::BBT_Offset const & bbt, Editing::GridType& gt) const;
+
+	MidiInspector* _midi_inspector;
+	ARDOUR::Quantize* get_quantize_op ();
+	void midi_view_selection_changed (SimpleMidiNoteSelection selection);
+	sigc::connection midi_view_selection_connection;
 
 	friend class RegionMoveDrag;
 	friend class TrimDrag;

@@ -21,11 +21,16 @@
 
 #include <iostream>
 
+#include "pbd/strsplit.h"
+
 #include "gtkmm2ext/keyboard.h"
 
 #include "evoral/Note.h"
 
 #include "canvas/text.h"
+
+#include "ardour/midi_track.h"
+#include "ardour/rc_configuration.h"
 
 #include "note_base.h"
 #include "editing_context.h"
@@ -38,6 +43,8 @@
 // Include last, when GRIDTYPE has been defined by editing.h via midi_region_view.h
 #include "editing_syms.inc.h"
 /* clang-format on */
+
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Gtkmm2ext;
@@ -52,10 +59,18 @@ const uint32_t NoteBase::midi_channel_colors[16] = {
 	  0x832dd3ff,  0xa92dd3ff,  0xd32dbfff,  0xd32d67ff
 	};
 
+std::vector<uint32_t> NoteBase::pitch_colors = {
+	  0xd32d2dff,  0xd36b2dff,  0xd3972dff,  0xd3d12dff,
+	  0xa0d32dff,  0x7dd32dff,  0x2dd45eff,  0x2dd3c4ff,
+	  0x2da5d3ff,  0x2d6fd3ff,  0x432dd3ff,  0x662dd3ff,
+};
+
 bool             NoteBase::_color_init = false;
 Gtkmm2ext::Color NoteBase::_selected_col = 0;
 Gtkmm2ext::SVAModifier NoteBase::color_modifier;
 Gtkmm2ext::Color NoteBase::velocity_color_table[128];
+
+static char const * const pitch_colors_node_name = X_("PitchColors");
 
 void
 NoteBase::set_colors ()
@@ -81,6 +96,20 @@ NoteBase::NoteBase(MidiView& v, bool with_events, const std::shared_ptr<NoteType
 {
 	if (!_color_init) {
 		NoteBase::set_colors();
+		XMLNode* pcnode = ARDOUR::Config->instant_xml (pitch_colors_node_name);
+		if (pcnode) {
+			std::string val;
+			if (pcnode->get_property ("colors", val)) {
+				std::vector<std::string> cols;
+				split (val, cols, ':');
+				pitch_colors.clear ();
+				for (auto & c : cols) {
+					uint32_t color = atoi (c.c_str());
+					pitch_colors.push_back (color);
+				}
+			}
+		}
+
 		_color_init = true;
 	}
 }
@@ -89,6 +118,22 @@ NoteBase::~NoteBase()
 {
 	_view.note_deleted (this);
 	delete _text;
+}
+
+void
+NoteBase::save_colors ()
+{
+	/* Currently pitch only, since they are the only ones that can be edited */
+
+	std::stringstream ss;
+
+	for (auto & pc : pitch_colors) {
+		ss << pc << ':';
+	}
+
+	XMLNode pcnode (pitch_colors_node_name);
+	pcnode.set_property (X_("colors"), ss.str());
+	ARDOUR::Config->add_instant_xml (pcnode);
 }
 
 void
@@ -181,11 +226,11 @@ NoteBase::set_selected(bool selected)
 uint32_t
 NoteBase::base_color ()
 {
-	return base_color (_note->velocity(), _view.midi_context().color_mode(), _view.midi_context().region_color(), _note->channel(), selected());
+	return base_color (_note->note(), _note->velocity(), _view.midi_context().color_mode(), _view.midi_track()->color(), _note->channel(), selected());
 }
 
 uint32_t
-NoteBase::base_color (int velocity, ARDOUR::ColorMode color_mode, Gtkmm2ext::Color default_color, int channel, bool selected)
+NoteBase::base_color (int pitch, int velocity, ARDOUR::ColorMode color_mode, Gtkmm2ext::Color track_color, int channel, bool selected)
 {
 	using namespace ARDOUR;
 
@@ -194,24 +239,22 @@ NoteBase::base_color (int velocity, ARDOUR::ColorMode color_mode, Gtkmm2ext::Col
 
 	switch (color_mode) {
 	case TrackColor:
-	{
-		const uint32_t region_color = default_color;
-		return UINT_INTERPOLATE (UINT_RGBA_CHANGE_A (region_color, opacity), _selected_col, 0.5);
-	}
+		return UINT_INTERPOLATE (UINT_RGBA_CHANGE_A (track_color, opacity), _selected_col, 0.5);
 
 	case ChannelColors:
+		channel = channel % (sizeof (midi_channel_colors) / sizeof (midi_channel_colors[0]));
 		return UINT_INTERPOLATE (UINT_RGBA_CHANGE_A (NoteBase::midi_channel_colors[channel], opacity), _selected_col, 0.5);
 
-	default:
-		if (UIConfiguration::instance().get_use_note_color_for_velocity()) {
-			return meter_style_fill_color(velocity, selected);
-		} else {
-			const uint32_t region_color = default_color;
-			return UINT_INTERPOLATE (UINT_RGBA_CHANGE_A (region_color, opacity), _selected_col, 0.5);
-		}
-	};
+	case PitchColors:
+		pitch = pitch % pitch_colors.size();
+		return NoteBase::pitch_colors[pitch];
 
-	return 0;
+	case MeterColors:
+		break;
+	}
+
+	/* MeterColors */
+	return meter_style_fill_color(velocity, selected);
 }
 
 void

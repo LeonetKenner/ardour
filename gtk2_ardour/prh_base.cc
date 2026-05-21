@@ -37,7 +37,6 @@
 
 #include "editing.h"
 #include "gui_thread.h"
-#include "midi_view.h"
 #include "midi_view_background.h"
 #include "mouse_cursors.h"
 #include "prh_base.h"
@@ -52,7 +51,6 @@ using namespace Gtkmm2ext;
 PianoRollHeaderBase::PianoRollHeaderBase (MidiViewBackground& bg)
 	: _midi_context (bg)
 	, _adj (_midi_context.note_range_adjustment)
-	, _view (nullptr)
 	, _font_descript (UIConfiguration::instance().get_NormalFont())
 	, _font_descript_big_c (UIConfiguration::instance().get_NormalFont())
 	, _font_descript_midnam (UIConfiguration::instance().get_NormalFont())
@@ -87,13 +85,6 @@ PianoRollHeaderBase::alloc_layouts (Glib::RefPtr<Pango::Context> context)
 	_font_descript_big_c.set_absolute_size (10.0 * Pango::SCALE);
 	_big_c_layout->set_font_description(_font_descript_big_c);
 	_midnam_layout = Pango::Layout::create (context);
-}
-
-void
-PianoRollHeaderBase::set_view (MidiView* v)
-{
-	_view = v;
-	_midi_context.NoteRangeChanged.connect (sigc::mem_fun (*this, &PianoRollHeaderBase::note_range_changed));
 }
 
 bool
@@ -534,33 +525,23 @@ PianoRollHeaderBase::motion_handler (GdkEventMotion* ev)
 
 		case TOP:
 			real_val_at_pointer = min (127.0, ceil (real_val_at_pointer));
-
-			if (_midi_context.note_height() >= UIConfiguration::instance().get_max_note_height() && real_val_at_pointer <= _saved_top_val){
-				_saved_top_val  = min (_adj.get_value() + _adj.get_page_size (), 127.0);
-			} else {
-				idle_lower      = _adj.get_value();
-				idle_upper      = real_val_at_pointer;
-				_saved_top_val  = idle_upper;
-				if (!scroomer_drag_connection.connected()) {
-					scroomer_drag_connection = Glib::signal_idle().connect (sigc::mem_fun (*this, &PianoRollHeaderBase::idle_apply_range));
-					scroomer_did_drag = true;
-				}
+			idle_lower      = max(0., _adj.get_value());
+			idle_upper      = min(127., real_val_at_pointer);
+			_saved_top_val  = idle_upper;
+			if (!scroomer_drag_connection.connected()) {
+				scroomer_drag_connection = Glib::signal_idle().connect (sigc::mem_fun (*this, &PianoRollHeaderBase::idle_apply_range));
+				scroomer_did_drag = true;
 			}
 			break;
 
 		case BOTTOM:
 			real_val_at_pointer = max (0.0, floor (real_val_at_pointer));
-
-			if (_midi_context.note_height() >= UIConfiguration::instance().get_max_note_height() && real_val_at_pointer >= _saved_bottom_val){
-				_saved_bottom_val  = _adj.get_value();
-			} else {
-				idle_upper        = _adj.get_value() + _adj.get_page_size();
-				idle_lower        = real_val_at_pointer;
-				_saved_bottom_val = idle_lower;
-				if (!scroomer_drag_connection.connected()) {
-					scroomer_drag_connection = Glib::signal_idle().connect (sigc::mem_fun (*this, &PianoRollHeaderBase::idle_apply_range));
-					scroomer_did_drag = true;
-				}
+			idle_lower        = max(0., real_val_at_pointer);
+			idle_upper        = min(127., _adj.get_value() + _adj.get_page_size());
+			_saved_bottom_val = idle_lower;
+			if (!scroomer_drag_connection.connected()) {
+				scroomer_drag_connection = Glib::signal_idle().connect (sigc::mem_fun (*this, &PianoRollHeaderBase::idle_apply_range));
+				scroomer_did_drag = true;
 			}
 			break;
 
@@ -625,7 +606,12 @@ PianoRollHeaderBase::motion_handler (GdkEventMotion* ev)
 bool
 PianoRollHeaderBase::idle_apply_range ()
 {
-	_midi_context.apply_note_range (idle_lower, idle_upper, true);
+	/* Check if the range is valid before submitting it to avoid
+	 * range automatic adjustment during dragging
+	 */
+	if (idle_upper - idle_lower >= 11 && _midi_context.contents_height() / (idle_upper - idle_lower) <= UIConfiguration::instance().get_max_note_height()) {
+		_midi_context.apply_note_range (idle_lower, idle_upper, true);
+	}
 	scroomer_drag_connection.disconnect ();
 	return false;
 }

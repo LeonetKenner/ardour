@@ -92,6 +92,13 @@ MidiStreamView::~MidiStreamView ()
 	undisplay_track ();
 }
 
+std::shared_ptr<ARDOUR::MidiTrack>
+MidiStreamView::midi_track() const
+{
+	return _trackview.midi_track();
+}
+
+
 InstrumentInfo*
 MidiStreamView::instrument_info() const
 {
@@ -296,7 +303,7 @@ MidiStreamView::redisplay_track ()
 	layer_regions();
 
 	// Update note range (not regions which are correct) and draw note lines
-	apply_note_range (_lowest_note, _highest_note, false);
+	apply_note_range (_data_note_min, _data_note_max, false);
 }
 
 void

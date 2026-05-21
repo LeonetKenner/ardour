@@ -37,12 +37,13 @@
 #include "ardour/session.h"
 #include "ardour/vca.h"
 
+#include "actions.h"
+#include "chord_box.h"
 #include "editor.h"
 #include "editor_drag.h"
 #include "editor_routes.h"
 #include "editor_section_box.h"
 #include "editor_sources.h"
-#include "actions.h"
 #include "audio_time_axis.h"
 #include "audio_region_view.h"
 #include "audio_streamview.h"
@@ -51,8 +52,10 @@
 #include "editor_regions.h"
 #include "editor_cursors.h"
 #include "keyboard.h"
+#include "midi_inspector.h"
 #include "midi_region_view.h"
 #include "mixer_strip.h"
+#include "note_base.h"
 #include "pianoroll.h"
 #include "selection_properties_box.h"
 #include "sfdb_ui.h"
@@ -1532,7 +1535,6 @@ Editor::sensitize_the_right_region_actions (bool because_canvas_crossing)
 
 	if (rs.size() > 1) {
 		_region_actions->get_action("show-region-list-editor")->set_sensitive (false);
-		_region_actions->get_action("edit-region-dedicated-window")->set_sensitive (false);
 		_region_actions->get_action("rename-region")->set_sensitive (false);
 		/* XXX need to check whether there is than 1 per
 		   playlist, because otherwise this makes no sense.
@@ -1737,7 +1739,12 @@ Editor::region_selection_changed ()
 		RegionView* rv = (selection->regions.back ());
 		assert (rv);
 		maybe_edit_region_in_bottom_pane (*rv);
+
+		std::shared_ptr<MidiRegion> mr (std::dynamic_pointer_cast<MidiRegion> (selection->regions.back()->region()));
+		_midi_inspector->set_region (_session, mr); /* mr could be null, that's OK */
 	}
+
+	EditingContext::region_selection_changed ();
 }
 
 void
@@ -2532,4 +2539,23 @@ Editor::selectable_owners()
 	}
 
 	return sl;
+}
+
+void
+Editor::midi_view_selection_changed (SimpleMidiNoteSelection& selection)
+{
+	if (selection.size() < 2) {
+		_midi_inspector->chord_box->show_chord ("");
+		return;
+	}
+
+	std::vector<int> pitches;
+
+	for (auto const & s : selection) {
+		pitches.push_back (s->note()->note());
+	}
+
+	std::sort (pitches.begin(), pitches.end());
+	std::string name = _midi_inspector->chord_box->identify_chord (pitches);
+	_midi_inspector->chord_box->show_chord (name);
 }

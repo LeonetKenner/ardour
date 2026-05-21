@@ -42,7 +42,9 @@ compiler_flags_dictionaries= {
         # Flags to use posix pipes between compiler stages
         'pipe' : '-pipe',
         # Flags for maximally optimized build
-        'full-optimization' : [ '-O3', '-fomit-frame-pointer', '-ffast-math', '-fstrength-reduce' ],
+        'full-optimization' : [ '-O3', '-fomit-frame-pointer', '-ffast-math', '-fno-finite-math-only', '-fstrength-reduce' ],
+        # Flags for DSP code, debug and optimized build
+        'dsp-optimization' : [ '-O3', '-ffast-math' ],
         # Flag to ensure that compiler error output includes column/line numbers
         'show-column' : '-fshow-column',
         # Flags required to build for x86 only (OS X feature)
@@ -93,15 +95,16 @@ compiler_flags_dictionaries= {
     'msvc' : {
         'debuggable' : ['/DDEBUG', '/Od', '/Z7', '/MDd', '/Gd', '/EHsc', '/JMC'],
         'linker-debuggable' : ['/DEBUG', '/INCREMENTAL' ],
-        'nondebuggable' : ['/DNDEBUG', '/Ob1', '/MD', '/Gd', '/EHsc'],
+        'nondebuggable' : ['/DNDEBUG', '/Ob2', '/MD', '/Gd', '/EHsc'],
         'profile' : ['/Oy-'],
         'silence-unused-arguments' : '',
         'sse' : '',
         'xsaveintrin' : '',
         'fpmath-sse' : '',
-        'xmmintrinsics' : '',
+        'xmmintrinsics' : ['/DUSE_XMMINTRIN'],
         'pipe' : '',
-        'full-optimization' : ['/O2'],
+        'full-optimization' : ['/O2', '/Oi', '/Ot', '/fp:fast', '/GS-', '/Gy', '/Gw', '/GF', '/favor:blend'],
+        'dsp-optimization' : ['/O2', '/fp:fast'],
         'no-frame-pointer' : '',
         'fast-math' : '',
         'strength-reduce' : '',
@@ -152,12 +155,12 @@ clang_dict['cxx-strict'] = [ '-ansi', '-Wnon-virtual-dtor', '-Woverloaded-virtua
 clang_dict['strict'] = ['-Wall', '-Wcast-align', '-Wextra', '-Wwrite-strings' ]
 clang_dict['generic-x86'] = [ '-arch', 'i386' ]
 clang_dict['generic-arm64'] = [ '-arch', 'arm64' ]
-clang_dict['full-optimization'] = [ '-O3', '-fomit-frame-pointer', '-ffast-math', ]
+clang_dict['full-optimization'] = [ '-O3', '-fomit-frame-pointer', '-ffast-math', '-fno-finite-math-only' ]
 compiler_flags_dictionaries['clang'] = clang_dict
 
 clang_darwin_dict = compiler_flags_dictionaries['clang'].copy()
 clang_darwin_dict['cxx-strict'] = [ '-ansi', '-Wnon-virtual-dtor', '-Woverloaded-virtual', ]
-clang_darwin_dict['full-optimization'] = [ '-O3', '-ffast-math']
+clang_darwin_dict['full-optimization'] = [ '-O3', '-ffast-math', '-fno-finite-math-only' ]
 compiler_flags_dictionaries['clang-darwin'] = clang_darwin_dict
 
 # Xcode 15 does not like our boost version, producing warnings from almost every file
@@ -486,16 +489,22 @@ int main() { return 0; }''',
 
     if compiler_name == 'msvc':
         compiler_flags.extend(['/nologo', '/FS', '/bigobj', '/FC',
-                               '/diagnostics:column', '/Zc:__cplusplus'])
-        linker_flags.extend(['/guard:cf'])
+                               '/diagnostics:column', '/Zc:__cplusplus',
+                               '/Zc:inline', '/Zc:throwingNew', '/cgthreads8'])
+        linker_flags.append('/guard:cf')
+        if not conf.env['DEBUG']:
+            linker_flags.append('/OPT:REF,ICF')
 
     autowaf.set_basic_compiler_flags (conf,flags_dict)
 
     if conf.options.asan:
-        conf.check_cxx(cxxflags=["-fsanitize=address", "-fno-omit-frame-pointer"], linkflags=["-fsanitize=address"])
-        cxx_flags.append('-fsanitize=address')
-        cxx_flags.append('-fno-omit-frame-pointer')
-        linker_flags.append('-fsanitize=address')
+        if conf.check_cxx(cxxflags=["-fsanitize=address", "-fno-omit-frame-pointer"], linkflags=["-fsanitize=address"], mandatory = False):
+            cxx_flags.append('-fsanitize=address')
+            cxx_flags.append('-fno-omit-frame-pointer')
+            linker_flags.append('-fsanitize=address')
+        elif conf.check_cxx(cxxflags=["-fsanitize=address"], linkflags=["-fsanitize=address"]):
+            cxx_flags.append('-fsanitize=address')
+            linker_flags.append('-fsanitize=address')
 
     if conf.options.tsan:
         conf.check_cxx(cxxflags=["-fsanitize=thread", "-fno-omit-frame-pointer"], linkflags=["-fsanitize=thread"])
@@ -1044,7 +1053,7 @@ def configure(conf):
 
     # set explicit LIBDIR, otherwise mingw/windows builds use
     # conf.env.LIBDIR = conf.env.BINDIR and `waf install` fails
-    # because $BINDIR/ardour6 is the main binary, and $LIBDIR/ardour6/ a directory
+    # because $BINDIR/ardourN is the main binary, and $LIBDIR/ardourN/ a directory
     if Options.options.libdir:
         conf.env.LIBDIR = Options.options.libdir
 
@@ -1077,15 +1086,12 @@ def configure(conf):
         #conf.env.append_value('LINKFLAGS_OSX', "-sysroot /Developer/SDKs/MacOSX10.4u.sdk")
         #conf.env.append_value('LINKFLAGS_OSX', "-sysroot /Developer/SDKs/MacOSX10.4u.sdk")
 
-        conf.env.append_value('CXXFLAGS_OSX', "-msse")
-        conf.env.append_value('CFLAGS_OSX', "-msse")
-        conf.env.append_value('CXXFLAGS_OSX', "-msse2")
-        conf.env.append_value('CFLAGS_OSX', "-msse2")
-        #
-        #       TODO: The previous sse flags NEED to be based
-        #       off processor type.  Need to add in a check
-        #       for that.
-        #
+        if not Options.options.arm64 and PLATFORM.uname()[4] not in ['arm64', 'aarch64']:
+            conf.env.append_value('CXXFLAGS_OSX', "-msse")
+            conf.env.append_value('CFLAGS_OSX', "-msse")
+            conf.env.append_value('CXXFLAGS_OSX', "-msse2")
+            conf.env.append_value('CFLAGS_OSX', "-msse2")
+
         conf.env.append_value('LINKFLAGS_OSX', ['-framework', 'AppKit'])
         conf.env.append_value('LINKFLAGS_OSX', ['-framework', 'CoreAudio'])
         conf.env.append_value('LINKFLAGS_OSX', ['-framework', 'CoreAudioKit'])
@@ -1638,8 +1644,16 @@ def build(bld):
         bld.recurse(i)
 
     if bld.env['build_target'] == 'msvc': #For using .def generator
-        for name in ['libydk-pixbuf', 'libydk', 'libytk']:
-            bld.get_tgen_by_name(name).features.append('gendef')
+        gendef_targets = ['libydk-pixbuf', 'libydk', 'libytk', 'libztkmm', 'libydkmm', 'libytkmm', 'libaaf']
+        if not Options.options.use_lld:
+            gendef_targets += ['libardourvampplugins', 'libardourvamppyin']
+
+        for name in gendef_targets:
+            tgen = bld.get_tgen_by_name(name) # Waf 'features' can be a list or a space separated string depending on the target
+            if isinstance(tgen.features, list):
+                tgen.features.append('gendef')
+            else:
+                tgen.features += ' gendef'
 
     if bld.is_defined ('BEATBOX'):
         bld.recurse('tools/bb')

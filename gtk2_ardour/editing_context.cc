@@ -25,6 +25,7 @@
 #include "ardour/legatize.h"
 #include "ardour/midi_region.h"
 #include "ardour/midi_source.h"
+#include "ardour/midi_track.h"
 #include "ardour/rc_configuration.h"
 #include "ardour/transpose.h"
 #include "ardour/quantize.h"
@@ -48,12 +49,14 @@
 #include "keyboard.h"
 #include "midi_region_view.h"
 #include "note_base.h"
+#include "pianoroll_window.h"
 #include "quantize_dialog.h"
 #include "rc_option_editor.h"
 #include "selection.h"
 #include "selection_memento.h"
 #include "transform_dialog.h"
 #include "transpose_dialog.h"
+#include "utils.h"
 #include "verbose_cursor.h"
 
 #include "pbd/i18n.h"
@@ -136,6 +139,18 @@ static const gchar *_zoom_focus_strings[] = {
 	0
 };
 
+/* These are used in comparisons with text loaded from a file, and are thus not
+ * yet translatable.
+ */
+
+std::vector<std::string> EditingContext::_chord_name_list ({
+		X_("maj"), X_("min"), X_("sus4"), X_("sus2"), X_("dim"), X_("aug"),
+		X_("maj7"), X_("7"), X_("min7"), X_("min6"), X_("min7b5"), X_("dim7"), X_("sus2/7"), X_("sus4/7"), X_("maj7#5"),
+		X_("dom9"), X_("9"), X_("min9"), X_("add9"), X_("min/9"), X_("maj6"), X_("min6"), X_("maj6/9"), X_("sus2/7"), X_("sus4/7"), X_("gtr5maj"), X_("gtr5min"),
+	});
+
+PBD::Signal<void()> EditingContext::ChordsChanged;
+
 EditingContext::EditingContext (std::string const & name)
 	: rubberband_rect (0)
 	, old_mouse_mode (Editing::MouseObject)
@@ -183,8 +198,8 @@ EditingContext::EditingContext (std::string const & name)
 	, minsec_mark_modulo (0)
 	, minsec_nmarks (0)
 	, temporary_zoom_focus_change (false)
- 	, _dragging_playhead (false)
-
+	, _dragging_playhead (false)
+	, pianoroll_window (nullptr)
 {
 	using namespace Gtk::Menu_Helpers;
 
@@ -263,6 +278,7 @@ EditingContext::EditingContext (std::string const & name)
 	note_mode_button.set_active_color (UIConfiguration::instance().color ("alert:yellow"));
 
 	selection->PointsChanged.connect (sigc::mem_fun(*this, &EditingContext::point_selection_changed));
+	selection->RegionsChanged.connect (sigc::mem_fun(*this, &EditingContext::region_selection_changed));
 
 	for (int i = 0; i < 16; i++) {
 		char buf[4];
@@ -313,6 +329,11 @@ EditingContext::~EditingContext()
 	if (_automation_actions) {
 		ActionManager::drop_action_group (_automation_actions);
 	}
+	if (chord_actions) {
+		ActionManager::drop_action_group (chord_actions);
+	}
+
+	delete pianoroll_window;
 }
 
 void
@@ -344,6 +365,8 @@ EditingContext::set_session (ARDOUR::Session* s)
 
 	SessionHandlePtr::set_session (s);
 	disable_automation_bindings ();
+	delete pianoroll_window;
+	pianoroll_window = nullptr;
 }
 
 void
@@ -441,6 +464,11 @@ EditingContext::set_action_defaults ()
 	if (draw_channel_actions.find (DRAW_CHAN_AUTO) != draw_channel_actions.end()) {
 		draw_channel_actions[DRAW_CHAN_AUTO]->set_active (false);
 		draw_channel_actions[DRAW_CHAN_AUTO]->set_active (true);
+	}
+	/* default draw chord action is first triad */
+	if (_no_chord_action) {
+		_no_chord_action->set_active (false);
+		_no_chord_action->set_active (true);
 	}
 }
 
@@ -564,6 +592,20 @@ EditingContext::register_common_actions (Bindings* common_bindings, std::string 
 }
 
 void
+EditingContext::enable_midi_bindings ()
+{
+	/* enable MIDI editing actions, which in turns enables their bindings */
+	ActionManager::set_sensitive (_midi_actions, true);
+}
+
+void
+EditingContext::disable_midi_bindings ()
+{
+	/* disable MIDI editing actions, which in turns disables their bindings */
+	ActionManager::set_sensitive (_midi_actions, false);
+}
+
+void
 EditingContext::register_midi_actions (Bindings* midi_bindings, std::string const & prefix)
 {
 	EC_LOCAL_TEMPO_SCOPE;
@@ -572,10 +614,25 @@ EditingContext::register_midi_actions (Bindings* midi_bindings, std::string cons
 
 	/* two versions to allow same action for Delete and Backspace */
 
-	ActionManager::register_action (_midi_actions, X_("clear-selection"), _("Clear Note Selection"), sigc::bind (sigc::mem_fun (*this, &EditingContext::midi_action), &MidiRegionView::clear_note_selection));
-	ActionManager::register_action (_midi_actions, X_("invert-selection"), _("Invert Note Selection"), sigc::bind (sigc::mem_fun (*this, &EditingContext::midi_action), &MidiRegionView::invert_selection));
-	ActionManager::register_action (_midi_actions, X_("extend-selection"), _("Extend Note Selection"), sigc::bind (sigc::mem_fun (*this, &EditingContext::midi_action), &MidiRegionView::extend_selection));
-	ActionManager::register_action (_midi_actions, X_("duplicate-selection"), _("Duplicate Note Selection"), sigc::bind (sigc::mem_fun (*this, &EditingContext::midi_action), &MidiRegionView::duplicate_selection));
+	ActionManager::register_action (_midi_actions, X_("clear-selection"), _("Clear Note Selection"), sigc::bind (sigc::mem_fun (*this, &EditingContext::midi_action), &MidiView::clear_selection));
+	ActionManager::register_action (_midi_actions, X_("invert-selection"), _("Invert Note Selection"), sigc::bind (sigc::mem_fun (*this, &EditingContext::midi_action), &MidiView::invert_selection));
+	ActionManager::register_action (_midi_actions, X_("extend-selection"), _("Extend Note Selection"), sigc::bind (sigc::mem_fun (*this, &EditingContext::midi_action), &MidiView::extend_selection));
+	ActionManager::register_action (_midi_actions, X_("duplicate-selection"), _("Duplicate Note Selection"), sigc::bind (sigc::mem_fun (*this, &EditingContext::midi_action), &MidiView::duplicate_selection));
+
+	/* Intervals */
+
+	ActionManager::register_action (_midi_actions, X_("add-interval-m2"), _("Add minor 2nd (1 semitone)"), sigc::bind (sigc::mem_fun (*this, &EditingContext::add_semitone_interval), 1));
+	ActionManager::register_action (_midi_actions, X_("add-interval-M2"), _("Add major 2nd (2 semitones)"), sigc::bind (sigc::mem_fun (*this, &EditingContext::add_semitone_interval), 2));
+	ActionManager::register_action (_midi_actions, X_("add-interval-m3"), _("Add minor 3rd (3 semitones)"), sigc::bind (sigc::mem_fun (*this, &EditingContext::add_semitone_interval), 3));
+	ActionManager::register_action (_midi_actions, X_("add-interval-M3"), _("Add major 3rd (4 semitones)"), sigc::bind (sigc::mem_fun (*this, &EditingContext::add_semitone_interval), 4));
+	ActionManager::register_action (_midi_actions, X_("add-interval-P4"), _("Add perfect 4th (5 semitones)"), sigc::bind (sigc::mem_fun (*this, &EditingContext::add_semitone_interval), 5));
+	ActionManager::register_action (_midi_actions, X_("add-interval-A4"), _("Add tritone (6 semitones)"), sigc::bind (sigc::mem_fun (*this, &EditingContext::add_semitone_interval), 6));
+	ActionManager::register_action (_midi_actions, X_("add-interval-P5"), _("Add perfect 5th (7 semitones)"), sigc::bind (sigc::mem_fun (*this, &EditingContext::add_semitone_interval), 7));
+	ActionManager::register_action (_midi_actions, X_("add-interval-m6"), _("Add minor 6th (8 semitones)"), sigc::bind (sigc::mem_fun (*this, &EditingContext::add_semitone_interval), 8));
+	ActionManager::register_action (_midi_actions, X_("add-interval-M6"), _("Add major 6th (9 semitones)"), sigc::bind (sigc::mem_fun (*this, &EditingContext::add_semitone_interval), 9));
+	ActionManager::register_action (_midi_actions, X_("add-interval-M7"), _("Add minor 7th (10 semitones)"), sigc::bind (sigc::mem_fun (*this, &EditingContext::add_semitone_interval), 10));
+	ActionManager::register_action (_midi_actions, X_("add-interval-m7"), _("Add major 7th (11 semitones)"), sigc::bind (sigc::mem_fun (*this, &EditingContext::add_semitone_interval), 11));
+	ActionManager::register_action (_midi_actions, X_("add-interval-P8"), _("Add octave (12 semitones)"), sigc::bind (sigc::mem_fun (*this, &EditingContext::add_semitone_interval), 12));
 
 	/* Lengthen */
 
@@ -715,6 +772,21 @@ EditingContext::register_midi_actions (Bindings* midi_bindings, std::string cons
 		char ch[64];
 		sprintf(ch, X_("Channel %d"), i+1);
 		draw_channel_actions[i] = ActionManager::register_radio_action (channel_actions, draw_channel_group, buf, ch, sigc::bind (sigc::mem_fun (*this, &EditingContext::draw_channel_chosen), i));
+	}
+
+	chord_actions = ActionManager::create_action_group (midi_bindings, prefix + X_("Chords"));
+	RadioAction::Group draw_chord_group;
+
+	draw_chord_actions.resize (30);
+
+	_no_chord_action = ActionManager::register_radio_action (chord_actions, draw_chord_group, X_("no-draw-chord"), _("No Chord"), sigc::bind (sigc::mem_fun (*this, &EditingContext::draw_chord_chosen), -1));
+
+	for (int n = 0; n < 30; ++n) {
+		char action_name[64];
+		char action_desc[64];
+		snprintf (action_name, sizeof (action_name), X_("draw-chord-%d"), n);
+		snprintf (action_desc, sizeof (action_desc), X_("Draw Chord #%d"), n + 1);
+		draw_chord_actions[n] = ActionManager::register_radio_action (chord_actions, draw_chord_group, action_name, action_desc,  sigc::bind (sigc::mem_fun (*this, &EditingContext::draw_chord_chosen), n));
 	}
 
 	ActionManager::set_sensitive (_midi_actions, false);
@@ -892,6 +964,58 @@ EditingContext::grid_type_chosen (GridType gt)
 	redisplay_grid (false);
 
 	SnapChanged (); /* EMIT SIGNAL */
+}
+
+Glib::RefPtr<Gtk::RadioAction>
+EditingContext::draw_chord_action (int num)
+{
+	if (num < (int) draw_chord_actions.size()) {
+		return draw_chord_actions[num];
+	}
+	return Glib::RefPtr<Gtk::RadioAction>();
+}
+
+void
+EditingContext::change_chord_list (size_t n, std::string const & short_name)
+{
+	if (n >= _chord_name_list.size()) {
+		return;
+	}
+
+	_chord_name_list[n] = short_name;
+	ChordsChanged (); /* EMIT SIGNAL */
+}
+
+void
+EditingContext::draw_chord_chosen (int num)
+{
+	EC_LOCAL_TEMPO_SCOPE;
+
+	if (num < 0) {
+		_draw_chord_name = std::string();
+		return;
+	}
+
+	/* this is driven by a toggle on a radio group, and so is invoked twice,
+	   once for the item that became inactive and once for the one that became
+	   active.
+	*/
+
+	RefPtr<RadioAction> ract;
+
+	ract = draw_chord_actions[std::max (std::min (size_t (num), _chord_name_list.size()), size_t (0))];
+
+	if (!ract->get_active()) {
+		return;
+	}
+
+	if (num >= (int) _chord_name_list.size()) {
+		return;
+	}
+
+	_draw_chord_name = _chord_name_list[num];
+
+	instant_save ();
 }
 
 void
@@ -1442,7 +1566,8 @@ EditingContext::follow_playhead() const
 		return false;
 	}
 
-	return follow_playhead_action->get_active ();
+	/* Prevent follow playhead during the drag to be nice to the user */
+	return follow_playhead_action->get_active () && !_drags->active ();
 }
 
 double
@@ -2130,6 +2255,29 @@ EditingContext::transform_regions (const MidiViews& rs)
 }
 
 void
+EditingContext::add_semitone_interval (int semitones)
+{
+	EC_LOCAL_TEMPO_SCOPE;
+
+	MidiViews mvs (midiviews_from_region_selection (region_selection ()));
+
+	if (mvs.empty()) {
+		return;
+	}
+
+	if (mvs.size() == 1) {
+		mvs.front()->add_semitone_interval (semitones);
+		return;
+	}
+
+	begin_reversible_command (string_compose (_("Add note interval of %1 semitones"), semitones));
+	for (auto & mv : mvs) {
+		mv->add_semitone_interval (semitones, true);
+	}
+	commit_reversible_command ();
+}
+
+void
 EditingContext::transpose_region ()
 {
 	EC_LOCAL_TEMPO_SCOPE;
@@ -2205,7 +2353,7 @@ EditingContext::apply_midi_note_edit_op_to_region (MidiOperator& op, MidiView& m
 	mrv.selection_as_notelist (selected, true);
 
 	if (selected.empty()) {
-		return 0;
+		return nullptr;
 	}
 
 	std::vector<Evoral::Sequence<Temporal::Beats>::Notes> v;
@@ -2791,13 +2939,28 @@ EditingContext::get_grid_music_divisions (Editing::GridType gt) const
 }
 
 Temporal::Beats
+EditingContext::get_draw_length_as_beats (bool& success, timepos_t const & position) const
+{
+	EC_LOCAL_TEMPO_SCOPE;
+	return get_a_grid_type_as_beats (draw_length() == DRAW_LEN_AUTO ? grid_type() : draw_length(), success, position);
+}
+
+Temporal::Beats
 EditingContext::get_grid_type_as_beats (bool& success, timepos_t const & position) const
+{
+	EC_LOCAL_TEMPO_SCOPE;
+	return get_a_grid_type_as_beats (grid_type(), success, position);
+
+}
+
+Temporal::Beats
+EditingContext::get_a_grid_type_as_beats (GridType gtype, bool& success, timepos_t const & position) const
 {
 	EC_LOCAL_TEMPO_SCOPE;
 
 	success = true;
 
-	int32_t const divisions = get_grid_beat_divisions (grid_type());
+	int32_t const divisions = get_grid_beat_divisions (gtype);
 	/* Beat (+1), and Bar (-1) are handled below */
 	if (divisions > 1) {
 		/* grid divisions are divisions of a 1/4 note */
@@ -2806,7 +2969,7 @@ EditingContext::get_grid_type_as_beats (bool& success, timepos_t const & positio
 
 	TempoMap::SharedPtr tmap (TempoMap::use());
 
-	switch (grid_type()) {
+	switch (gtype) {
 	case GridTypeBar:
 		if (_session) {
 			const Meter& m = tmap->meter_at (position);
@@ -2868,23 +3031,6 @@ EditingContext::get_grid_type_as_beats (bool& success, timepos_t const & positio
 		break;
 	}
 
-	return Temporal::Beats();
-}
-
-Temporal::Beats
-EditingContext::get_draw_length_as_beats (bool& success, timepos_t const & position) const
-{
-	EC_LOCAL_TEMPO_SCOPE;
-
-	success = true;
-	GridType grid_to_use = draw_length() == DRAW_LEN_AUTO ? grid_type() : draw_length();
-	int32_t const divisions = get_grid_beat_divisions (grid_to_use);
-
-	if (divisions != 0) {
-		return Temporal::Beats::ticks (Temporal::Beats::PPQN / divisions);
-	}
-
-	success = false;
 	return Temporal::Beats();
 }
 
@@ -3592,49 +3738,49 @@ EditingContext::reset_x_origin_to_follow_playhead ()
 
 	samplepos_t const sample = _playhead_cursor->current_sample ();
 
-	if (sample < _leftmost_sample || sample > _leftmost_sample + current_page_samples()) {
+	if (sample > _leftmost_sample && sample <= _leftmost_sample + current_page_samples()) {
+		return;
+	}
 
-		if (_session->transport_speed() < 0) {
+	if (_session->transport_speed() < 0) {
 
-			if (sample > (current_page_samples() / 2)) {
-				center_screen (sample-(current_page_samples()/2));
-			} else {
-				center_screen (current_page_samples()/2);
-			}
-
+		if (sample > (current_page_samples() / 2)) {
+			center_screen (sample-(current_page_samples()/2));
 		} else {
-
-			samplepos_t l = 0;
-
-			if (sample < _leftmost_sample) {
-				/* moving left */
-				if (_session->transport_rolling()) {
-					/* rolling; end up with the playhead at the right of the page */
-					l = sample - current_page_samples ();
-				} else {
-					/* not rolling: end up with the playhead 1/4 of the way along the page */
-					l = sample - current_page_samples() / 4;
-				}
-			} else {
-				/* moving right */
-				if (_session->transport_rolling()) {
-					/* rolling: end up with the playhead on the left of the page */
-					l = sample;
-				} else {
-					/* not rolling: end up with the playhead 3/4 of the way along the page */
-					l = sample - 3 * current_page_samples() / 4;
-				}
-			}
-
-			if (l < 0) {
-				l = 0;
-			}
-
-			center_screen_internal (l + (current_page_samples() / 2), current_page_samples ());
+			center_screen (current_page_samples()/2);
 		}
+
+	} else {
+
+		samplepos_t l = 0;
+
+		if (sample < _leftmost_sample) {
+			/* moving left */
+			if (_session->transport_rolling()) {
+				/* rolling; end up with the playhead at the right of the page */
+				l = sample - current_page_samples ();
+			} else {
+				/* not rolling: end up with the playhead 1/4 of the way along the page */
+				l = sample - current_page_samples() / 4;
+			}
+		} else {
+			/* moving right */
+			if (_session->transport_rolling()) {
+				/* rolling: end up with the playhead on the left of the page */
+				l = sample;
+			} else {
+				/* not rolling: end up with the playhead 3/4 of the way along the page */
+				l = sample - 3 * current_page_samples() / 4;
+			}
+		}
+
+		if (l < 0) {
+			l = 0;
+		}
+
+		center_screen_internal (l + (current_page_samples() / 2), current_page_samples ());
 	}
 }
-
 
 void
 EditingContext::center_screen (samplepos_t sample)
@@ -3991,6 +4137,8 @@ EditingContext::set_minsec_ruler_scale (samplepos_t lower, samplepos_t upper)
 void
 EditingContext::scroll_left_step ()
 {
+	EC_LOCAL_TEMPO_SCOPE;
+
 	samplepos_t xdelta = (current_page_samples() / 8);
 
 	if (_leftmost_sample > xdelta) {
@@ -4004,6 +4152,8 @@ EditingContext::scroll_left_step ()
 void
 EditingContext::scroll_right_step ()
 {
+	EC_LOCAL_TEMPO_SCOPE;
+
 	samplepos_t xdelta = (current_page_samples() / 8);
 
 	if (max_samplepos - xdelta > _leftmost_sample) {
@@ -4016,6 +4166,8 @@ EditingContext::scroll_right_step ()
 void
 EditingContext::scroll_left_half_page ()
 {
+	EC_LOCAL_TEMPO_SCOPE;
+
 	samplepos_t xdelta = (current_page_samples() / 2);
 	if (_leftmost_sample > xdelta) {
 		reset_x_origin (_leftmost_sample - xdelta);
@@ -4027,6 +4179,8 @@ EditingContext::scroll_left_half_page ()
 void
 EditingContext::scroll_right_half_page ()
 {
+	EC_LOCAL_TEMPO_SCOPE;
+
 	samplepos_t xdelta = (current_page_samples() / 2);
 	if (max_samplepos - xdelta > _leftmost_sample) {
 		reset_x_origin (_leftmost_sample + xdelta);
@@ -4039,4 +4193,97 @@ Gtk::Menu*
 EditingContext::get_single_region_context_menu ()
 {
 	return nullptr;
+}
+
+void
+EditingContext::region_selection_changed ()
+{
+	EC_LOCAL_TEMPO_SCOPE;
+
+	if (!pianoroll_window || selection->regions.empty()) {
+		return;
+	}
+
+	pianoroll_window->remove_regions ();
+
+	std::vector<MidiRegionView*> midi_region_views;
+	std::set<Temporal::Beats> positions;
+
+	for (auto & rv : selection->regions) {
+		MidiRegionView* mrv = dynamic_cast<MidiRegionView*> (rv);
+		if (mrv) {
+			midi_region_views.push_back (mrv);
+			positions.insert (mrv->region()->position().beats());
+		}
+	}
+
+	if (midi_region_views.empty()) {
+		return;
+	}
+
+	if (positions.size() > 1) {
+		/* multiple positions for the regions, so just pick one of the
+		   positions, and the regions there
+		*/
+
+		Temporal::Beats first_position (*positions.begin());
+
+		for (auto i = midi_region_views.begin(); i != midi_region_views.end(); ) {
+			if ((*i)->region()->position().beats() != first_position) {
+				i = midi_region_views.erase (i);
+			} else {
+				i++;
+			}
+		}
+	}
+
+	bool have_set = false;
+
+	std::shared_ptr<ARDOUR::MidiTrack> kt;
+	std::shared_ptr<ARDOUR::MidiRegion> kr;
+
+	for (auto & mrv : midi_region_views) {
+		TimeAxisView& tav (mrv->get_time_axis_view());
+		RouteTimeAxisView* rtav = dynamic_cast<RouteTimeAxisView*> (&tav);
+		if (!rtav) { /* how */
+			continue;
+		}
+
+		std::shared_ptr<MidiTrack> track = std::dynamic_pointer_cast<MidiTrack> (rtav->stripable());
+		if (!track) {
+			continue;
+		}
+
+		std::shared_ptr<MidiRegion> midi_region = std::dynamic_pointer_cast<MidiRegion> (mrv->region());
+		if (!midi_region) {
+			continue;
+		}
+
+		if (!have_set) {
+			kt = track;
+			kr = midi_region;
+			have_set = true;
+		} else {
+			pianoroll_window->add_region (track, midi_region);
+		}
+	}
+
+	pianoroll_window->set_region (kt, kr);
+}
+
+void
+EditingContext::pianoroll_edit ()
+{
+	EC_LOCAL_TEMPO_SCOPE;
+
+	if (!pianoroll_window) {
+		pianoroll_window = new PianorollWindow (_("Pianoroll Window"), *_session);
+	}
+
+	pianoroll_window->set_show_source (false);
+
+	region_selection_changed ();
+
+	pianoroll_window->show_all ();
+	pianoroll_window->present ();
 }

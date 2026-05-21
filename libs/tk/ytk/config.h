@@ -3,10 +3,12 @@
 
 #ifdef _MSC_VER
 #define GETTEXT_PACKAGE "gtk20"
-#endif
 
+#ifndef GTK_LOCALEDIR
 /* Define the location where the catalogs will be installed */
 #define GTK_LOCALEDIR "/ardour/share/locale"
+#endif
+#endif
 
 /* Define to 1 if you have the `bind_textdomain_codeset' function. */
 #ifndef __APPLE__

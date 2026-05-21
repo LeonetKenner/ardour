@@ -116,37 +116,71 @@ Rectangle::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) con
 
 		setup_outline_context (context);
 
-		const double shift = _outline_width * 0.5;
-		self = self.translate (Duple (shift, shift));
+		Rectangle::What outline_what (_outline_what);
+		Rect outline_rect (self);
 
-		if (_outline_what == ALL) {
+		/* Adjust outline rect coordinates so that the outline
+		 * is drawn inside the bounding box
+		 */
+		outline_rect = outline_rect.expand (-_outline_width * 0.5);
+
+		/* Our goal here is ensure that we do not pass very large
+		 * (typically, > 32767) coordinates to cairo_stroke. Even if we
+		 * are drawing with a clip region imposed (e.g. a the Canvas
+		 * level) cairo goes bananas if told to stroke "huge"
+		 * rectanges. That means both altering the coordinates used for
+		 * strokes, but also potentially changing which edges of the
+		 * rectangle we attempt to stroke.
+		 */
+
+		if (outline_rect.x0 - _outline_width * 0.5 < draw.x0) {
+			outline_rect.x0 = draw.x0;
+			outline_what = Rectangle::What (outline_what & ~Rectangle::LEFT);
+		}
+
+		if (outline_rect.x1 + _outline_width * 0.5 > draw.x1) {
+			outline_rect.x1 = draw.x1;
+			outline_what = Rectangle::What (outline_what & ~Rectangle::RIGHT);
+		}
+
+		if (outline_rect.y0 - _outline_width * 0.5 < draw.y0) {
+			outline_rect.y0 = draw.y0;
+			outline_what = Rectangle::What (outline_what & ~Rectangle::TOP);
+		}
+
+		if (outline_rect.y1 + _outline_width * 0.5 > draw.y1) {
+			outline_rect.y1 = draw.y1;
+			outline_what = Rectangle::What (outline_what & ~Rectangle::BOTTOM);
+		}
+
+		if (outline_what == ALL) {
 
 			if (_corner_radius) {
-				Gtkmm2ext::rounded_rectangle (context, self.x0, self.y0, self.width() - _outline_width, self.height() - _outline_width, _corner_radius);
+				Gtkmm2ext::rounded_rectangle (context, outline_rect.x0, outline_rect.y0, outline_rect.width(), outline_rect.height() , _corner_radius);
 			} else {
-				context->rectangle (self.x0, self.y0, self.width() - _outline_width, self.height() - _outline_width);
+				context->rectangle (outline_rect.x0, outline_rect.y0, outline_rect.width(), outline_rect.height());
 			}
 
 		} else {
 
-			if (_outline_what & LEFT) {
-				context->move_to (self.x0, self.y0);
-				context->line_to (self.x0, self.y1);
+			if (outline_what & LEFT) {
+				context->move_to (outline_rect.x0, outline_rect.y0);
+				context->line_to (outline_rect.x0, outline_rect.y1);
 			}
 
-			if (_outline_what & TOP) {
-				context->move_to (self.x0, self.y0);
-				context->line_to (self.x1, self.y0);
+			if (outline_what & TOP) {
+				context->move_to (outline_rect.x0, outline_rect.y0);
+				context->line_to (outline_rect.x1, outline_rect.y0);
 			}
 
-			if (_outline_what & BOTTOM) {
-				context->move_to (self.x0, self.y1);
-				context->line_to (self.x1, self.y1);
+			if (outline_what & BOTTOM) {
+				context->move_to (outline_rect.x0, outline_rect.y1);
+				context->line_to (outline_rect.x1, outline_rect.y1);
 			}
 
-			if (_outline_what & RIGHT) {
-				context->move_to (self.x1, self.y0);
-				context->line_to (self.x1, self.y1);
+			if (outline_what & RIGHT) {
+				context->move_to (outline_rect.x1, outline_rect.y0);
+				context->line_to (outline_rect.x1, outline_rect.y1);
 			}
 		}
 
@@ -323,5 +357,6 @@ Rectangle::dump (std::ostream & o) const
 {
 	Item::dump (o);
 
-	o << _canvas->indent() << " outline: w " << outline_width() << " color " << outline_color() << " what 0x" << std::hex << _outline_what << std::dec << endl;
+	o << _canvas->indent() << " outline: w " << outline_width() << " color 0x" << std::hex << outline_color() << " what 0x" << _outline_what << std::dec << endl;
+	o << _canvas->indent() << " fill  " << _fill << " color 0x " << std::hex << fill_color() << std::dec << endl;
 }

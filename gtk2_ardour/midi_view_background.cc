@@ -45,7 +45,7 @@ MidiViewBackground::MidiViewBackground (ArdourCanvas::Item* parent, EditingConte
 	, _data_note_max (0)
 	, _note_lines (new ArdourCanvas::RectSet (parent))
 	, _note_mode (ARDOUR::Sustained)
-	, _color_mode (ARDOUR::MeterColors)
+	, _color_mode (UIConfiguration::instance().get_default_midi_note_color_mode())
 	, _visibility_note_range (ContentsRange)
 	, note_range_set (false)
 {
@@ -211,6 +211,10 @@ MidiViewBackground::setup_note_lines()
 			break;
 		}
 
+		if (y + h > contents_height()) {
+			/* clip last note line to avoid bleeding */
+			h -= y + h - contents_height();
+		}
 
 		_note_lines->add_rect (i, ArdourCanvas::Rect (0., y, ArdourCanvas::COORD_MAX, y + h), color);
 
@@ -259,18 +263,27 @@ MidiViewBackground::maybe_apply_note_range (uint8_t lowest, uint8_t highest, boo
 bool
 MidiViewBackground::apply_note_range (uint8_t lowest, uint8_t highest, bool to_children)
 {
-	if (contents_height() == 0) {
-		return false;
-	}
-
 	bool changed = false;
 
 	/* Enforce a 1 octave minimum */
 
 	if (highest - lowest < 11) {
-		int8_t mid = lowest + ((highest - lowest) / 2);
-		lowest = std::max (mid - 6, 0);
+		int mid = lowest + ((highest - lowest) / 2);
+		mid = max(6, min(122, mid));
+		lowest = mid - 6;
 		highest = lowest + 11;
+	}
+
+	/* Apply maximum note height setting */
+	
+	bool extend_top = true;
+	while (contents_height() / (highest - lowest) > UIConfiguration::instance().get_max_note_height()) {
+		if (extend_top && highest < 127) {
+			highest++;
+		} else if (!extend_top && lowest > 0) {
+			lowest--;
+		}
+		extend_top = !extend_top;
 	}
 
 	if (_highest_note != highest) {
@@ -281,6 +294,10 @@ MidiViewBackground::apply_note_range (uint8_t lowest, uint8_t highest, bool to_c
 	if (_lowest_note != lowest) {
 		changed = true;
 		_lowest_note = lowest;
+	}
+
+	if (contents_height() == 0) {
+		return false;
 	}
 
 	if (note_range_set && !changed) {

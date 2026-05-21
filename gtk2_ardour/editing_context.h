@@ -37,6 +37,7 @@
 #include "temporal/timeline.h"
 #include "temporal/scope.h"
 
+#include "ardour/chord_provider.h"
 #include "ardour/midi_operator.h"
 #include "ardour/session_handle.h"
 #include "ardour/types.h"
@@ -74,13 +75,14 @@ class GridLines;
 class MidiRegionView;
 class MidiView;
 class MouseCursors;
+class PianorollWindow;
 class VerboseCursor;
 class TrackViewList;
 class Selection;
 class SelectionMemento;
 class SelectableOwner;
 
-class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider, public Temporal::ScopedTempoMapOwner, public virtual sigc::trackable
+class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider, public Temporal::ScopedTempoMapOwner, public ARDOUR::ChordProvider, public virtual sigc::trackable
 {
  public:
 	EditingContext (std::string const &);
@@ -278,6 +280,7 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 	virtual bool canvas_cue_end_event (GdkEvent* event, ArdourCanvas::Item*) { return true; }
 	virtual bool canvas_bg_event (GdkEvent* event, ArdourCanvas::Item*) = 0;
 
+	Temporal::Beats get_a_grid_type_as_beats (Editing::GridType, bool& success, Temporal::timepos_t const & position) const;
 	Temporal::Beats get_grid_type_as_beats (bool& success, Temporal::timepos_t const & position) const;
 	Temporal::Beats get_draw_length_as_beats (bool& success, Temporal::timepos_t const & position) const;
 
@@ -345,6 +348,7 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 	void reset_point_selection ();
 
 	virtual void point_selection_changed () = 0;
+	virtual void region_selection_changed ();
 
 	/** Set the mouse mode (gain, object, range, timefx etc.)
 	 * @param m Mouse mode (defined in editing_syms.inc.h)
@@ -388,6 +392,9 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 		return *_verbose_cursor;
 	}
 
+	virtual void note_entered () {}
+	virtual void note_left () {}
+
 	virtual void set_snapped_cursor_position (Temporal::timepos_t const & pos) = 0;
 
 	static sigc::signal<void> DropDownKeys;
@@ -398,7 +405,7 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 	typedef std::vector<MidiView*> MidiViews;
 
 	/* MIDI actions, proxied to selected MidiRegionView(s) */
-	ARDOUR::Quantize* get_quantize_op ();
+	virtual ARDOUR::Quantize* get_quantize_op ();
 	ARDOUR::Strum* get_strum_op (bool, bool);
 	void apply_midi_note_edit_op (ARDOUR::MidiOperator& op, const RegionSelection& rs);
 	void apply_midi_note_edit_op (ARDOUR::MidiOperator& op, const MidiViews& rs);
@@ -425,6 +432,8 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 	void register_common_actions (Gtkmm2ext::Bindings*, std::string const &);
 	void register_automation_actions (Gtkmm2ext::Bindings*, std::string const &);
 	virtual void set_action_defaults ();
+	void enable_midi_bindings ();
+	void disable_midi_bindings ();
 
 	ArdourCanvas::Rectangle* rubberband_rect;
 
@@ -436,7 +445,7 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 
 	bool typed_event (ArdourCanvas::Item*, GdkEvent*, ItemType);
 
-	void set_horizontal_position (double);
+	virtual void set_horizontal_position (double);
 	double horizontal_position () const;
 
 	virtual samplecnt_t current_page_samples() const = 0;
@@ -522,6 +531,22 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 
 	virtual Gtk::Menu* get_single_region_context_menu ();
 
+	bool get_midi_chord (int root_pitch, std::vector<int>& pitches) const { return false; }
+	Glib::RefPtr<Gtk::RadioAction> draw_chord_action (int num);
+	Glib::RefPtr<Gtk::RadioAction> no_chord_action () { return _no_chord_action; }
+
+	static std::vector<std::string> const & chord_name_list()  { return _chord_name_list; }
+	static void change_chord_list (std::vector<std::string>::size_type, std::string const & new_chord_name);
+	static PBD::Signal<void()> ChordsChanged;
+
+	std::string const & draw_chord_name() const { return _draw_chord_name; }
+	bool have_draw_chord() const { return !_draw_chord_name.empty(); }
+
+	virtual void add_semitone_interval (int semitones);
+
+	void pianoroll_edit ();
+	virtual void midi_view_selection_changed (SimpleMidiNoteSelection& selection) {}
+
   protected:
 	std::string _name;
 	bool within_track_canvas;
@@ -534,6 +559,7 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 	Glib::RefPtr<Gtk::ActionGroup> length_actions;
 	Glib::RefPtr<Gtk::ActionGroup> channel_actions;
 	Glib::RefPtr<Gtk::ActionGroup> velocity_actions;
+	Glib::RefPtr<Gtk::ActionGroup> chord_actions;
 	Glib::RefPtr<Gtk::ActionGroup> zoom_actions;
 
 	virtual void load_shared_bindings ();
@@ -556,7 +582,10 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 	std::map<Editing::ZoomFocus, Glib::RefPtr<Gtk::RadioAction> > zoom_focus_actions;
 	std::map<int, Glib::RefPtr<Gtk::RadioAction> > draw_velocity_actions;
 	std::map<int, Glib::RefPtr<Gtk::RadioAction> > draw_channel_actions;
+	std::vector<Glib::RefPtr<Gtk::RadioAction> > draw_chord_actions;
+	Glib::RefPtr<Gtk::RadioAction> _no_chord_action;
 
+	void draw_chord_chosen (int);
 	void draw_channel_chosen (int);
 	void draw_velocity_chosen (int);
 	void draw_length_chosen (Editing::GridType);
@@ -871,4 +900,8 @@ class EditingContext : public ARDOUR::SessionHandlePtr, public AxisViewProvider,
 
 	bool temporary_zoom_focus_change;
 	bool _dragging_playhead;
+	static std::vector<std::string> _chord_name_list;
+	std::string _draw_chord_name;
+
+	PianorollWindow* pianoroll_window;
 };

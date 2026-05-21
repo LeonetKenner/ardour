@@ -101,8 +101,6 @@
 #include "step_editor.h"
 #include "note_base.h"
 
-#include "ardour/midi_track.h"
-
 #include "pbd/i18n.h"
 
 using namespace ARDOUR;
@@ -126,9 +124,6 @@ MidiTimeAxisView::MidiTimeAxisView (PublicEditor& ed, Session* sess, ArdourCanva
 	, _piano_roll_header(nullptr)
 	, _note_mode_item(0)
 	, _percussion_mode_item(nullptr)
-	, _meter_color_mode_item(nullptr)
-	, _channel_color_mode_item(nullptr)
-	, _track_color_mode_item(0)
 	, _channel_selector (nullptr)
 	, midnam_selector (nullptr)
 	, _step_edit_item (nullptr)
@@ -157,6 +152,10 @@ MidiTimeAxisView::parameter_changed (string const & param)
 	if (param == X_("note-name-display")) {
 		if (_piano_roll_header) {
 			_piano_roll_header->instrument_info_change ();
+		}
+	} else if (param == X_("default-midi-note-color-mode")) {
+		if (_view) {
+			midi_view()->set_color_mode (UIConfiguration::instance().get_default_midi_note_color_mode());
 		}
 	}
 }
@@ -1133,26 +1132,35 @@ MidiTimeAxisView::build_color_mode_menu()
 	ColorMode cm = midi_view()->color_mode ();
 
 	RadioMenuItem::Group mode_group;
+	RadioMenuItem* rmi;
+
 	items.push_back (
 		RadioMenuElem (mode_group, _("Meter Colors"),
 		               sigc::bind (sigc::mem_fun (*this, &MidiTimeAxisView::set_color_mode),
 		                           MeterColors, false, true, true)));
-	_meter_color_mode_item = dynamic_cast<RadioMenuItem*>(&items.back());
-	_meter_color_mode_item->set_active(cm == MeterColors);
+	rmi = dynamic_cast<RadioMenuItem*>(&items.back());
+	rmi->set_active(cm == MeterColors);
 
 	items.push_back (
 		RadioMenuElem (mode_group, _("Channel Colors"),
 		               sigc::bind (sigc::mem_fun (*this, &MidiTimeAxisView::set_color_mode),
 		                           ChannelColors, false, true, true)));
-	_channel_color_mode_item = dynamic_cast<RadioMenuItem*>(&items.back());
-	_channel_color_mode_item->set_active(cm == ChannelColors);
+	rmi = dynamic_cast<RadioMenuItem*>(&items.back());
+	rmi->set_active(cm == ChannelColors);
+
+	items.push_back (
+		RadioMenuElem (mode_group, _("Pitch Colors"),
+		               sigc::bind (sigc::mem_fun (*this, &MidiTimeAxisView::set_color_mode),
+		                           PitchColors, false, true, true)));
+	rmi = dynamic_cast<RadioMenuItem*>(&items.back());
+	rmi->set_active(cm == PitchColors);
 
 	items.push_back (
 		RadioMenuElem (mode_group, _("Track Color"),
 		               sigc::bind (sigc::mem_fun (*this, &MidiTimeAxisView::set_color_mode),
 		                           TrackColor, false, true, true)));
-	_channel_color_mode_item = dynamic_cast<RadioMenuItem*>(&items.back());
-	_channel_color_mode_item->set_active(cm == TrackColor);
+	rmi = dynamic_cast<RadioMenuItem*>(&items.back());
+	rmi->set_active(cm == TrackColor);
 
 	return mode_menu;
 }
@@ -1834,3 +1842,21 @@ MidiTimeAxisView::color_mode() const
 
 	return ARDOUR::TrackColor;
 }
+
+void
+MidiTimeAxisView::entered ()
+{
+	TimeAxisView::entered ();
+
+	if (_editor.internal_editing()) {
+		_editor.enable_midi_bindings ();
+	}
+}
+
+void
+MidiTimeAxisView::exited ()
+{
+	TimeAxisView::exited();
+	_editor.disable_midi_bindings ();
+}
+

@@ -145,15 +145,14 @@ Editor::mouse_mode_chosen (MouseMode m)
 	/* Switch snap type/mode if we're moving to/from an internal tool.  Note
 	   this must toggle the actions and not call set_snap_*() directly,
 	   otherwise things get out of sync and the combo box stops working. */
-	if (!UIConfiguration::instance().get_grid_follows_internal()) {
-		grid_actions[pre_internal_grid_type]->set_active(true);
-		snap_mode_actions[pre_internal_snap_mode]->set_active(true);
-	} else if (!was_internal && internal_editing()) {
-		grid_actions[internal_grid_type]->set_active(true);
-		snap_mode_actions[internal_snap_mode]->set_active(true);
-	} else if (was_internal && !internal_editing()) {
-		grid_actions[pre_internal_grid_type]->set_active(true);
-		snap_mode_actions[pre_internal_snap_mode]->set_active(true);
+	if (UIConfiguration::instance().get_grid_follows_internal()) {
+		if (!was_internal && internal_editing()) {
+			grid_actions[internal_grid_type]->set_active(true);
+			snap_mode_actions[internal_snap_mode]->set_active(true);
+		} else if (was_internal && !internal_editing()) {
+			grid_actions[pre_internal_grid_type]->set_active(true);
+			snap_mode_actions[pre_internal_snap_mode]->set_active(true);
+		}
 	}
 
 	instant_save ();
@@ -205,16 +204,15 @@ Editor::mouse_mode_chosen (MouseMode m)
 		*/
 		_track_canvas->grab_focus ();
 
-		/* enable MIDI editing actions, which in turns enables their
-		   bindings
-		*/
-		ActionManager::set_sensitive (_midi_actions, true);
+		if (entered_track && dynamic_cast<MidiTimeAxisView*> (entered_track)) {
+			enable_midi_bindings ();
+		}
 
 	} else {
 		/* undo some of the above actions, since we're not in internal
 		   edit mode.
 		*/
-		ActionManager::set_sensitive (_midi_actions, false);
+		disable_midi_bindings ();
 	}
 
 	if (was_internal && !internal_editing()) {
@@ -739,6 +737,9 @@ Editor::button_press_handler_1 (ArdourCanvas::Item* item, GdkEvent* event, ItemT
 			}
 			break;
 
+		case DropZoneItem:
+			/* fallthrough: allows removing time by selecting a range in the dropzone */
+
 		default:
 			if (Keyboard::modifier_state_equals (event->button.state, Keyboard::RangeSelectModifier) && !selection->time.empty()) {
 				_drags->set (new SelectionDrag (*this, item, SelectionDrag::SelectionExtend), event);
@@ -797,6 +798,8 @@ Editor::button_press_handler_1 (ArdourCanvas::Item* item, GdkEvent* event, ItemT
 			return true;
 			break;
 
+		case DropZoneItem:
+			/* fallthrough: allows starting a selectin from the dropzone */
 		case StreamItem:
 			/* in the past, we created a new midi region here, but perhaps that is best left to the Draw mode */
 			/* .. now we allow for rubberband selection (region gain) */
@@ -938,6 +941,8 @@ Editor::button_press_handler_1 (ArdourCanvas::Item* item, GdkEvent* event, ItemT
 				return true;
 				break;
 
+			case DropZoneItem:
+				/* fallthrough: allows starting a selectin from the dropzone */
 			case StreamItem:
 				_drags->set (new RubberbandSelectDrag (*this, item, [&](GdkEvent* ev, timepos_t const & pos) { return this->rb_click (ev, pos); }), event);
 				return true;
@@ -1943,11 +1948,11 @@ Editor::edit_region (RegionView* rv)
 		if (att_bottom_visible()) {
 			maybe_edit_region_in_bottom_pane (*rv);
 		} else {
-			rv->show_region_editor ();
+			edit_region_in_dedicated_window ();
 		}
 		break;
 	case Editing::NeverBottomPane:
-		rv->show_region_editor ();
+		edit_region_in_dedicated_window ();
 		break;
 	}
 }

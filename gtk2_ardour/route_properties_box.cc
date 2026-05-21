@@ -31,6 +31,8 @@
 #include "gtkmm2ext/gui_thread.h"
 #include "gtkmm2ext/utils.h"
 
+#include "widgets/tooltips.h"
+
 #include "ardour_ui.h"
 #include "mixer_ui.h"
 #include "plugin_selector.h"
@@ -45,6 +47,89 @@
 using namespace Gtk;
 using namespace ARDOUR;
 using namespace ArdourWidgets;
+
+class ProcessorUIFrame : public Gtk::Frame
+{
+public:
+	ProcessorUIFrame (std::shared_ptr<Route>, std::shared_ptr<Processor>, GenericPluginUI*);
+
+private:
+	void save_state () const;
+
+	Gtk::HBox    _top;
+	Gtk::VBox    _ctrl_box;
+	Gtk::Label   _label;
+	ArdourButton _collapse_btn;
+	ArdourButton _enable_btn;
+
+	std::string                _strip_id;
+	std::string                _state_id;
+	GenericPluginUI*           _ui;
+	std::shared_ptr<Processor> _proc;
+	PBD::ScopedConnectionList  _connections;
+};
+
+ProcessorUIFrame::ProcessorUIFrame (std::shared_ptr<Route> r, std::shared_ptr<Processor> p, GenericPluginUI* ui)
+	: _label (p->display_name ())
+	, _collapse_btn (ArdourButton::default_elements, true)
+	, _enable_btn (ArdourButton::just_led_default_elements)
+	, _strip_id (string_compose ("strip %1", r->id ().to_s ()))
+	, _state_id (string_compose ("procuiframe %1", p->id ().to_s ()))
+	, _ui (ui)
+	, _proc (p)
+{
+	_label.property_angle () = 90;
+	_collapse_btn.set_icon (ArdourIcon::ArrowRight);
+	_collapse_btn.set_name ("processor collapse button");
+	_collapse_btn.set_tweaks (ArdourButton::Square);
+	_enable_btn.set_tweaks (ArdourButton::ExpandtoSquare);
+
+	ui->set_no_show_all ();
+
+	_ctrl_box.pack_start (_collapse_btn, false, false, 4);
+	_ctrl_box.pack_start (_label, true, true);
+	_ctrl_box.pack_start (_enable_btn, false, false, 7);
+	_top.pack_start (_ctrl_box, false, false);
+	_top.pack_start (*ui, true, true);
+	add (_top);
+	show_all ();
+
+	set_tooltip (&_collapse_btn, _("Collapse"));
+	set_tooltip (&_enable_btn, _("Bypass"));
+
+	_enable_btn.set_active (_proc->enabled ());
+	_collapse_btn.signal_clicked.connect ([&] () {
+			bool a = !_collapse_btn.get_active ();
+			_ui->set_visible (a);
+			save_state ();
+			_collapse_btn.set_icon (a ? ArdourIcon::ArrowLeft : ArdourIcon::ArrowRight);
+			});
+	_enable_btn.signal_clicked.connect ([&] () { _proc->enable (!_proc->enabled ()); });
+
+	p->ActiveChanged.connect (_connections, invalidator (*this), [&] () { _enable_btn.set_active (_proc->enabled ()); }, gui_context ());
+
+	bool            visible = true;
+	GUIObjectState& st      = *ARDOUR_UI::instance ()->gui_object_state;
+	XMLNode*        strip   = st.get_or_add_node (_strip_id);
+	XMLNode*        n       = GUIObjectState::get_node (strip, _state_id);
+	if (n) {
+		n->get_property (X_("visible"), visible);
+	}
+	_collapse_btn.set_active (!visible);
+	_collapse_btn.set_icon (visible ? ArdourIcon::ArrowLeft : ArdourIcon::ArrowRight);
+	_ui->set_visible (visible);
+}
+
+void
+ProcessorUIFrame::save_state () const
+{
+	GUIObjectState& st    = *ARDOUR_UI::instance ()->gui_object_state;
+	XMLNode*        strip = st.get_or_add_node (_strip_id);
+	XMLNode*        state = st.get_or_add_node (strip, _state_id);
+	state->set_property (X_("visible"), !_collapse_btn.get_active ());
+}
+
+/* ****************************************************************************/
 
 RoutePropertiesBox::RoutePropertiesBox ()
 	: _insert_box (nullptr)
@@ -243,13 +328,17 @@ RoutePropertiesBox::add_processor_to_display (std::weak_ptr<Processor> w)
 	}
 	//pib->DropReferences.connect (_processor_connections, invalidator (*this), std::bind (&RoutePropertiesBox::refill_processors, this), gui_context());
 	_proc_uis.push_back (plugin_ui);
-
+#if 0
 	ArdourWidgets::Frame* frame = new ArdourWidgets::Frame ();
 	frame->set_label (p->display_name ());
 	frame->add (*plugin_ui);
 	frame->set_padding (0);
 	_box.pack_start (*frame, false, false);
 	plugin_ui->show ();
+#else
+	ProcessorUIFrame* frame = new ProcessorUIFrame (_route, p, plugin_ui);
+	_box.pack_start (*frame, false, false);
+#endif
 }
 
 int

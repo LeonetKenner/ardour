@@ -350,7 +350,7 @@ VCATimeAxisView::stripable () const
 Gdk::Color
 VCATimeAxisView::color () const
 {
-	return Gtkmm2ext::gdk_color_from_rgb (_vca->presentation_info().color ());
+	return Gtkmm2ext::gdk_color_from_rgba (_vca->presentation_info().color ());
 }
 
 void
@@ -497,7 +497,7 @@ VCATimeAxisView::build_automation_action_menu (bool for_selection)
 	}
 
 	if (trim_track) {
-		items.push_back (CheckMenuElem (_("Trim"), sigc::mem_fun (*this, &VCATimeAxisView::update_trim_track_visibility)));
+		items.push_back (CheckMenuElem (S_("Gain|Trim"), sigc::mem_fun (*this, &VCATimeAxisView::update_trim_track_visibility)));
 		trim_automation_item = dynamic_cast<Gtk::CheckMenuItem*> (&items.back ());
 		trim_automation_item->set_active (string_to<bool>(trim_track->gui_property ("visible")));
 

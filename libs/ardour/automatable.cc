@@ -188,7 +188,19 @@ Automatable::add_control(std::shared_ptr<Evoral::Control> ac)
 }
 
 string
+Automatable::get_parameter_name (Evoral::Parameter param) const
+{
+	return get_parameter_string (param, true);
+}
+
+string
 Automatable::describe_parameter (Evoral::Parameter param)
+{
+	return get_parameter_string (param, false);
+}
+
+string
+Automatable::get_parameter_string (Evoral::Parameter param, bool just_name) const
 {
 	/* derived classes like PluginInsert should override this */
 
@@ -201,7 +213,7 @@ Automatable::describe_parameter (Evoral::Parameter param)
 	} else if (param.type() == InsertReturnLevel) {
 		return _("Return");
 	} else if (param.type() == TrimAutomation) {
-		return _("Trim");
+		return S_("Gain|Trim");
 	} else if (param.type() == MainOutVolume) {
 		return _("Master Volume");
 	} else if (param.type() == MuteAutomation) {
@@ -235,15 +247,31 @@ Automatable::describe_parameter (Evoral::Parameter param)
 	} else if (param.type() == MidiVelocityAutomation) {
 		return _("Velocity");
 	} else if (param.type() == MidiCCAutomation) {
-		return string_compose ("[%1] %2:%3", int (param.channel ()) + 1, param.id (), _("Controller"));
+		if (!just_name) {
+			return string_compose ("[%1] %2:%3", int (param.channel ()) + 1, param.id (), _("Controller"));
+		} else {
+			return string_compose ("CC %1", param.id());
+		}
 	} else if (param.type() == MidiPgmChangeAutomation) {
 		return string_compose("Program [%1]", int(param.channel()) + 1);
 	} else if (param.type() == MidiPitchBenderAutomation) {
-		return string_compose("Bender [%1]", int(param.channel()) + 1);
+		if (!just_name) {
+			return string_compose("Bender [%1]", int(param.channel()) + 1);
+		} else {
+			return X_("Bender");
+		}
 	} else if (param.type() == MidiChannelPressureAutomation) {
-		return string_compose("Pressure [%1]", int(param.channel()) + 1);
+		if (!just_name) {
+			return string_compose("Pressure [%1]", int(param.channel()) + 1);
+		} else {
+			return X_("Pressure");
+		}
 	} else if (param.type() == MidiNotePressureAutomation) {
-		return string_compose("PolyPressure [%1]", int(param.channel()) + 1);
+		if (!just_name) {
+			return string_compose("PolyPressure [%1]", int(param.channel()) + 1);
+		} else {
+			return X_("PolyPressure");
+		}
 	} else if (param.type() == PluginPropertyAutomation) {
 		return string_compose("Property %1", URIMap::instance().id_to_uri(param.id()));
 	} else {

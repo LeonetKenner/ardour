@@ -177,23 +177,17 @@ CueEditor::get_nudge_distance (Temporal::timepos_t const & pos, Temporal::timecn
 }
 
 void
-CueEditor::instant_save()
+CueEditor::initialize_region_ui_settings (RegionUISettings& rus)
 {
-	EC_LOCAL_TEMPO_SCOPE;
-
-	if (!_region) {
-		return;
-	}
-
 	/* derived classes should set other fields first, then call parent */
 
-	region_ui_settings.follow_playhead = follow_playhead();
-	region_ui_settings.samples_per_pixel = samples_per_pixel;
-	region_ui_settings.grid_type = grid_type ();
-	region_ui_settings.zoom_focus = zoom_focus();
-	region_ui_settings.mouse_mode = current_mouse_mode();
-	region_ui_settings.x_origin = _leftmost_sample;
-	region_ui_settings.snap_mode = snap_mode ();
+	rus.follow_playhead = follow_playhead();
+	rus.samples_per_pixel = samples_per_pixel;
+	rus.grid_type = grid_type ();
+	rus.zoom_focus = zoom_focus();
+	rus.mouse_mode = current_mouse_mode();
+	rus.x_origin = _leftmost_sample;
+	rus.snap_mode = snap_mode ();
 
 	/* If we're inside an ArdourWindow, get it's geometry */
 	Gtk::Widget* toplevel = contents().get_toplevel ();
@@ -210,18 +204,22 @@ CueEditor::instant_save()
 			aw->get_window()->get_geometry (x, y, width, height, depth);
 			aw->get_window()->get_origin (wx, wy);
 
-			region_ui_settings.height = height;
-			region_ui_settings.width = width;
-			region_ui_settings.x = wx;
-			region_ui_settings.y = wy;;
+			rus.height = height;
+			rus.width = width;
+			rus.x = wx - x;
+			rus.y = wy - y;
 		}
 	}
+}
 
-	std::pair<RegionUISettingsManager::iterator,bool> res (ARDOUR_UI::instance()->region_ui_settings_manager.insert (std::make_pair (_region->id(), region_ui_settings)));
+void
+CueEditor::add_region_ui_settings (PBD::ID const & id, RegionUISettings& rus)
+{
+	auto res (ARDOUR_UI::instance()->region_ui_settings_manager.insert (std::make_pair (id, rus)));
 
 	if (!res.second) {
 		/* region (ID) already present, set contents */
-		res.first->second = region_ui_settings;
+		res.first->second = rus;
 	}
 }
 
@@ -381,14 +379,16 @@ CueEditor::_get_preferred_edit_position (Editing::EditIgnoreOption ignore, bool 
 {
 	EC_LOCAL_TEMPO_SCOPE;
 
-	samplepos_t where;
+	samplepos_t samples;
 	bool in_track_canvas = false;
 
-	if (!mouse_sample (where, in_track_canvas)) {
+	if (!mouse_sample (samples, in_track_canvas)) {
 		return Temporal::timepos_t (0);
 	}
 
-	return Temporal::timepos_t (where);
+	timepos_t where = timepos_t (samples);
+	snap_to (where);
+	return where;
 }
 
 Gtk::Box*
@@ -531,7 +531,7 @@ CueEditor::build_upper_toolbar ()
 	pack_outer (*toolbar_outer);
 
 	toolbar_outer->pack_start (*(manage (new ArdourScalingSpacer (16, 1))), false, false);
-	toolbar_outer->pack_start (*toolbar_inner, true, false);
+	toolbar_outer->pack_start (*toolbar_inner, false, false);
 
 	build_zoom_focus_menu ();
 	zoom_focus_selector.set_text (zoom_focus_strings[(int)zoom_focus()]);
@@ -547,7 +547,9 @@ CueEditor::build_upper_toolbar ()
 	toolbar_outer->pack_end (*toolbar_right, false, false);
 	_toolbox.pack_start (*toolbar_outer, false, false); // VBox
 
-	_contents.add (_toolbox);
+	_hpacker.pack_start (_toolbox, true, true);
+
+	_contents.add (_hpacker);
 	_contents.signal_unmap().connect ([this]()  { get_canvas_viewport()->unmap (); }, false);
 	_contents.signal_map().connect ([this]() { get_canvas_viewport()->map (); }, false);
 }
@@ -1374,7 +1376,10 @@ CueEditor::set_trigger (TriggerReference& tref)
 		length_selector.set_active (0); /* "until stopped" */
 	}
 
-	set_region (trigger->the_region());
+	remove_regions ();
+	add_region (trigger->the_region (), _track);
+	set_region (trigger->the_region ());
+
 	if (trigger->armed()) {
 		play_button.set_sensitive (false);
 	} else {
@@ -1454,15 +1459,18 @@ CueEditor::unset_trigger ()
 	unset_region ();
 }
 
-void
-CueEditor::maybe_set_from_rsu ()
+bool
+CueEditor::maybe_set_from_rsu (PBD::ID const & id)
 {
 	EC_LOCAL_TEMPO_SCOPE;
 
-	RegionUISettingsManager::iterator rsu = ARDOUR_UI::instance()->region_ui_settings_manager.find (_region->id());
+	RegionUISettingsManager::iterator rsu = ARDOUR_UI::instance()->region_ui_settings_manager.find (id);
 	if (rsu != ARDOUR_UI::instance()->region_ui_settings_manager.end()) {
 		set_from_rsu (rsu->second);
+		return true;
 	}
+
+	return false;
 }
 
 void
@@ -1483,6 +1491,7 @@ CueEditor::set_from_rsu (RegionUISettings& rsu)
 	set_draw_length (rsu.draw_length);
 	set_draw_velocity (rsu.draw_velocity);
 	set_draw_channel (rsu.channel);
+	set_inspector_visibility (rsu.inspector_visible);
 
 	if (rsu.width > 0) {
 		/* If we're inside an ArdourWindow, set it's geometry */
@@ -2094,4 +2103,13 @@ CueEditor::set_end (Temporal::timepos_t const & p)
 	r->trim_end (_region->source_position() + p);
 	add_command (new PBD::StatefulDiffCommand (r));
 	commit_reversible_command ();
+}
+
+void
+CueEditor::set_horizontal_position (double pos)
+{
+	EC_LOCAL_TEMPO_SCOPE;
+
+	EditingContext::set_horizontal_position (pos);
+	instant_save ();
 }

@@ -96,7 +96,7 @@ PianoRollHeader::size_request (double& w, double& h) const
 	h = _midi_context.contents_height();
 
 	if (show_scroomer()) {
-		_scroomer_size = 60.f * UIConfiguration::instance().get_ui_scale();
+		_scroomer_size = 120.f * UIConfiguration::instance().get_ui_scale();
 	} else {
 		_scroomer_size = kbd_width * UIConfiguration::instance().get_ui_scale();
 	}
@@ -207,11 +207,7 @@ PianoRollHeader::cursor_window()
 std::shared_ptr<ARDOUR::MidiTrack>
 PianoRollHeader::midi_track()
 {
-	if (_view) {
-		return _view->midi_track ();
-	}
-
-	return nullptr;
+	return _midi_context.midi_track();
 }
 
 

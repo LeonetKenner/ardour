@@ -1228,9 +1228,9 @@ Editor::parameter_changed (std::string p)
 
 		bool const s = _session->config.get_show_summary ();
 		if (s) {
-			_summary_hbox.show ();
+			_summary_vbox.show ();
 		} else {
-			_summary_hbox.hide ();
+			_summary_vbox.hide ();
 		}
 
 		Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action (X_("Editor"), X_("ToggleSummary"));
@@ -1534,14 +1534,10 @@ Editor::automation_end_edit ()
 {
 	AutomationTimeAxisView* atv = dynamic_cast<AutomationTimeAxisView*> (entered_track);
 
-	if (!atv) {
+	if (!atv || !atv->line() || !atv->line()->end_edit ()) {
 		ARDOUR_UI::instance()->Escape ();
-		return;
 	}
 
-	if (!atv->line()->end_edit ()) {
-		ARDOUR_UI::instance()->Escape ();
-	}
 }
 
 void

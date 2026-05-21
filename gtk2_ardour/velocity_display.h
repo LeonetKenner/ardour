@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <sigc++/trackable.h>
+
 #include "canvas/rectangle.h"
 #include "canvas/poly_line.h"
 
@@ -38,10 +40,10 @@ class MidiViewBackground;
 class MidiView;
 class NoteBase;
 
-class VelocityDisplay
+class VelocityDisplay : virtual public sigc::trackable
 {
   public:
-	VelocityDisplay (EditingContext&, MidiViewBackground&, MidiView&, ArdourCanvas::Rectangle& base_rect, ArdourCanvas::Container&, GhostEvent::EventList& el, Gtkmm2ext::Color oc);
+	VelocityDisplay (EditingContext&, MidiViewBackground&, MidiView&, ArdourCanvas::Rectangle& base_rect, GhostEvent::EventList& el, Gtkmm2ext::Color oc);
 	virtual ~VelocityDisplay ();
 
 	void hide ();
@@ -69,8 +71,6 @@ class VelocityDisplay
 	void set_sensitive (bool yn);
 	bool sensitive () const;
 
-	void set_selected (bool);
-
 	bool line_draw_motion (ArdourCanvas::Duple const & d, ArdourCanvas::Rectangle const & r, double last_x);
 	bool line_extended (ArdourCanvas::Duple const & from, ArdourCanvas::Duple const & to, ArdourCanvas::Rectangle const & r, double last_x);
 
@@ -87,7 +87,6 @@ class VelocityDisplay
 	MidiViewBackground& bg;
 	MidiView& view;
 	ArdourCanvas::Rectangle& base;
-	ArdourCanvas::Container* lolli_container;
 	GhostEvent::EventList& events;
 	Gtkmm2ext::Color _outline;
 	bool dragging;

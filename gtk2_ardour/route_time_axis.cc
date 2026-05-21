@@ -87,6 +87,7 @@
 #include "public_editor.h"
 #include "region_view.h"
 #include "selection.h"
+#include "scale_dialog.h"
 #include "streamview.h"
 #include "ui_config.h"
 #include "utils.h"
@@ -430,10 +431,12 @@ RouteTimeAxisView::label_view ()
 	string x = _route->name ();
 	if (x != name_label.get_text ()) {
 		name_label.set_text (x);
+		ArdourWidgets::set_tooltip (name_label, string_compose (_("%1 (double click to edit)"), x));
 	}
 
 	inactive_label.set_text (string_compose("(%1)", x));
 	inactive_label.show ();
+	ArdourWidgets::set_tooltip (inactive_label, string_compose (_("%1 (Inactive, right click to activate)"), x));
 
 	const int64_t track_number = _route->track_number ();
 	if (track_number == 0) {
@@ -587,7 +590,7 @@ RouteTimeAxisView::build_automation_action_menu (bool for_selection)
 	}
 
 	if (trim_track) {
-		items.push_back (CheckMenuElem (_("Trim"), sigc::mem_fun (*this, &RouteTimeAxisView::update_trim_track_visibility)));
+		items.push_back (CheckMenuElem (S_("Gain|Trim"), sigc::mem_fun (*this, &RouteTimeAxisView::update_trim_track_visibility)));
 		trim_automation_item = dynamic_cast<Gtk::CheckMenuItem*> (&items.back ());
 		trim_automation_item->set_active (single_track_selected &&
 		                                  string_to<bool>(trim_track->gui_property ("visible")));
@@ -618,6 +621,25 @@ RouteTimeAxisView::build_automation_action_menu (bool for_selection)
 }
 
 void
+RouteTimeAxisView::edit_scale ()
+{
+	if (!_route || !_route->key()) {
+		return;
+	}
+
+	ScaleDialog sd;
+	sd.set (*_route->key());
+
+	sd.present ();
+
+	int response = sd.run ();
+
+	switch (response) {
+		break;
+	}
+}
+
+void
 RouteTimeAxisView::build_display_menu ()
 {
 	using namespace Menu_Helpers;
@@ -637,6 +659,9 @@ RouteTimeAxisView::build_display_menu ()
 	bool active = _route->active ();
 
 	MenuList& items = display_menu->items();
+
+	// Awaiting expanded/complete scale support
+	// items.push_back (MenuElem (_("Scale..."), sigc::mem_fun (*this, &RouteTimeAxisView::edit_scale)));
 
 	/* now fill it with our stuff */
 	if (active) {

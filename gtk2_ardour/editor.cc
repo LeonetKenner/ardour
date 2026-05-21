@@ -108,6 +108,7 @@
 #include "audio_time_axis.h"
 #include "automation_time_axis.h"
 #include "bundle_manager.h"
+#include "chord_box.h"
 #include "crossfade_edit.h"
 #include "debug.h"
 #include "editing.h"
@@ -133,6 +134,7 @@
 #include "keyboard.h"
 #include "luainstance.h"
 #include "marker.h"
+#include "midi_inspector.h"
 #include "midi_region_view.h"
 #include "midi_time_axis.h"
 #include "midi_view.h"
@@ -378,6 +380,7 @@ Editor::Editor ()
 	, track_drag (nullptr)
 	, _visible_marker_types (all_marker_types)
 	, _visible_range_types (all_range_types)
+	, _midi_inspector (nullptr)
 {
 	/* we are a singleton */
 
@@ -536,31 +539,6 @@ Editor::Editor ()
 	Location::end_changed.connect (*this, invalidator (*this), std::bind (&Editor::location_changed, this, _1), gui_context());
 	Location::changed.connect (*this, invalidator (*this), std::bind (&Editor::location_changed, this, _1), gui_context());
 
-	add_notebook_page (_("Tracks"), _("Tracks & Busses"), _routes->widget ());
-	add_notebook_page (_("Sources"), _("Sources"), _sources->widget ());
-	add_notebook_page (_("Regions"), _("Regions"), _regions->widget ());
-	add_notebook_page (_("Clips"), _("Clips"), _trigger_clip_picker);
-	add_notebook_page (_("Arrange"), _("Arrangement"), _sections->widget ());
-	add_notebook_page (_("Snaps"), _("Snapshots"), _snapshots->widget ());
-	add_notebook_page (_("Groups"), _("Track & Bus Groups"), _route_groups->widget ());
-	add_notebook_page (_("Marks"), _("Ranges & Marks"), _locations->widget ());
-
-	_notebook_tab2.set_index (4);
-
-	_the_notebook.set_show_tabs (false);
-	_the_notebook.set_scrollable (true);
-	_the_notebook.popup_disable ();
-	_the_notebook.show_all ();
-
-	_the_notebook.signal_switch_page().connect ([this](GtkNotebookPage*, guint page) {
-			std::string label (_the_notebook.get_tab_label_text (*_the_notebook.get_nth_page (page)));
-			_notebook_tab1.set_active (label);
-			_notebook_tab2.set_active (label);
-			instant_save ();
-			});
-
-	_notebook_tab1.set_name ("tab button");
-	_notebook_tab2.set_name ("tab button");
 
 	/* Pick up some settings we need to cache, early */
 
@@ -569,33 +547,72 @@ Editor::Editor ()
 	editor_summary_pane.set_check_divider_position (true);
 	editor_summary_pane.add (edit_packer);
 
-	Button* summary_arrow_left = manage (new Button);
-	summary_arrow_left->add (*manage (new Arrow (ARROW_LEFT, SHADOW_NONE)));
-	summary_arrow_left->signal_pressed().connect (sigc::hide_return (sigc::bind (sigc::mem_fun (*this, &Editor::scroll_press), LEFT)));
-	summary_arrow_left->signal_released().connect (sigc::mem_fun (*this, &Editor::scroll_release));
+	ArdourButton* summary_arrow_left = manage (new ArdourButton);
+	summary_arrow_left->set_corner_mask(ArdourButton::LEFT);
+	summary_arrow_left->set_icon(ArdourIcon::ArrowLeft);
+	summary_arrow_left->set_act_on_release(false);
+	summary_arrow_left->signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &Editor::scroll_press), LEFT), false);
+	summary_arrow_left->signal_button_release_event().connect (sigc::mem_fun (*this, &Editor::scroll_release), false);
 
-	Button* summary_arrow_right = manage (new Button);
-	summary_arrow_right->add (*manage (new Arrow (ARROW_RIGHT, SHADOW_NONE)));
-	summary_arrow_right->signal_pressed().connect (sigc::hide_return (sigc::bind (sigc::mem_fun (*this, &Editor::scroll_press), RIGHT)));
-	summary_arrow_right->signal_released().connect (sigc::mem_fun (*this, &Editor::scroll_release));
+	ArdourButton* summary_arrow_right = manage (new ArdourButton);
+	summary_arrow_right->set_corner_mask(ArdourButton::RIGHT);
+	summary_arrow_right->set_icon(ArdourIcon::ArrowRight);
+	summary_arrow_right->set_act_on_release(false);
+	summary_arrow_right->signal_button_press_event().connect (sigc::bind (sigc::mem_fun (*this, &Editor::scroll_press), RIGHT), false);
+	summary_arrow_right->signal_button_release_event().connect (sigc::mem_fun (*this, &Editor::scroll_release), false);
 
-	VBox* summary_arrows_left = manage (new VBox);
-	summary_arrows_left->pack_start (*summary_arrow_left);
+	Gtk::EventBox* summary_left_spacer = manage (new Gtk::EventBox); // extra h-space before the summary
+	summary_left_spacer->set_size_request(4, -1);
+	summary_left_spacer->show();
+	Gtk::EventBox* summary_bottom_spacer = manage (new Gtk::EventBox); // extra v-space after the summary
+	summary_bottom_spacer->set_size_request(-1, 3);
+	summary_bottom_spacer->show();
 
-	VBox* summary_arrows_right = manage (new VBox);
-	summary_arrows_right->pack_start (*summary_arrow_right);
+	VBox* summary_zoom_vbox = manage (new Gtk::VBox);
+	HBox* summary_zoom_hbox = manage (new Gtk::HBox);
 
-	Gtk::Frame* summary_frame = manage (new Gtk::Frame);
-	summary_frame->set_shadow_type (Gtk::SHADOW_ETCHED_IN);
+	HBox* summary_toolbar = manage (new Gtk::HBox);
+	summary_toolbar->pack_start(*summary_arrow_left, true, true, 0);
+	summary_toolbar->pack_start(zoom_out_button, true, true, 0);
+	summary_toolbar->pack_start(zoom_in_button, true, true, 0);
+	summary_toolbar->pack_start(full_zoom_button, true, true, 0);
+	summary_toolbar->pack_start(*summary_arrow_right, true, true, 0);
 
-	summary_frame->add (*_summary);
-	summary_frame->show ();
+	Glib::RefPtr<SizeGroup> grp = SizeGroup::create (Gtk::SIZE_GROUP_BOTH);
+	grp->add_widget(*summary_arrow_right);
+	grp->add_widget(full_zoom_button);
+	grp->add_widget(zoom_in_button);
+	grp->add_widget(zoom_out_button);
+	grp->add_widget(*summary_arrow_left);
 
-	_summary_hbox.pack_start (*summary_arrows_left, false, false);
+	summary_zoom_hbox->pack_end(*summary_toolbar, false, false, 0);
+	summary_zoom_vbox->pack_end(*summary_zoom_hbox, false, false, 0);
+
+	summary_arrow_left->set_corner_mask(ArdourButton::NONE);
+	zoom_out_button.set_corner_mask(ArdourButton::NONE);
+	zoom_in_button.set_corner_mask(ArdourButton::NONE);
+	full_zoom_button.set_corner_mask(ArdourButton::NONE);
+	summary_arrow_right->set_corner_mask(ArdourButton::NONE);
+
+	summary_arrow_left->set_border_mask(ArdourButton::HIDE_BOTTOM);
+	zoom_out_button.set_border_mask(ArdourButton::HIDE_LEFT | ArdourButton::HIDE_RIGHT | ArdourButton::HIDE_BOTTOM);
+	zoom_in_button.set_border_mask(ArdourButton::HIDE_BOTTOM);
+	full_zoom_button.set_border_mask(ArdourButton::HIDE_LEFT | ArdourButton::HIDE_RIGHT | ArdourButton::HIDE_BOTTOM);
+	summary_arrow_right->set_border_mask(ArdourButton::HIDE_RIGHT | ArdourButton::HIDE_BOTTOM);
+
+	_summary->add(*summary_zoom_vbox);
+
+	Gtk::Frame* summary_frame = manage (new Gtk::Frame); // summary border
+	summary_frame->set_name("SummaryFrame");
+	summary_frame->add(*_summary);
+
+	_summary_hbox.pack_start (*summary_left_spacer, false, false);
 	_summary_hbox.pack_start (*summary_frame, true, true);
-	_summary_hbox.pack_start (*summary_arrows_right, false, false);
 
-	editor_summary_pane.add (_summary_hbox);
+	_summary_vbox.pack_start (_summary_hbox, true, true);
+	_summary_vbox.pack_start (*summary_bottom_spacer, false, false);
+
+	editor_summary_pane.add (_summary_vbox);
 
 	HBox* tabbox = manage (new HBox (true));
 	tabbox->set_spacing (3);
@@ -610,12 +627,13 @@ Editor::Editor ()
 	content_right_pane.set_drag_cursor (*_cursors->expand_left_right);
 	editor_summary_pane.set_drag_cursor (*_cursors->expand_up_down);
 
-	float fract;
-	if (!settings || !settings->get_property ("edit-vertical-pane-pos", fract) || fract > 1.0) {
-		/* initial allocation is 90% to canvas, 10% to summary */
-		fract = 0.90;
+	float size;
+	if (!settings || !settings->get_property ("edit-vertical-pane-size", size) || size < 1.0) {
+		/* initial allocation so that summary has minimum size*/
+		size = -1;
+		editor_summary_pane.set_divider (0, 0.999);
 	}
-	editor_summary_pane.set_divider (0, fract);
+	editor_summary_pane.set_absolute_divider (0, ArdourWidgets::Pane::DividerMode::AbsoluteAfter, size);
 
 	global_vpacker.set_spacing (0);
 	global_vpacker.set_border_width (0);
@@ -650,6 +668,40 @@ Editor::Editor ()
 	load_bindings ();
 	register_actions ();
 	bind_mouse_mode_buttons ();
+
+	/* MIDI Inspect needs MIDI bindings during construction*/
+
+	_midi_inspector = manage (new MidiInspector (*this));
+	_midi_inspector->chord_box->ReplaceChord.connect ([this](std::vector<int> intervals) { replace_chord (intervals); });
+	_midi_inspector->chord_box->InvertChord.connect ([this](bool up) { invert_selected_chord (up); });
+	_midi_inspector->chord_box->DropChord.connect ([this](std::vector<int> which_notes) { drop_selected_chord (which_notes); });
+
+	add_notebook_page (_("Tracks"), _("Tracks & Busses"), _routes->widget ());
+	add_notebook_page (_("Sources"), _("Sources"), _sources->widget ());
+	add_notebook_page (_("Regions"), _("Regions"), _regions->widget ());
+	add_notebook_page (_("Clips"), _("Clips"), _trigger_clip_picker);
+	add_notebook_page (_("Arrange"), _("Arrangement"), _sections->widget ());
+	add_notebook_page (_("Snaps"), _("Snapshots"), _snapshots->widget ());
+	add_notebook_page (_("Groups"), _("Track & Bus Groups"), _route_groups->widget ());
+	add_notebook_page (_("Marks"), _("Ranges & Marks"), _locations->widget ());
+	add_notebook_page (_("Inspector"), _("MIDI Inspector"), *_midi_inspector);
+
+	_notebook_tab2.set_index (4);
+
+	_the_notebook.set_show_tabs (false);
+	_the_notebook.set_scrollable (true);
+	_the_notebook.popup_disable ();
+	_the_notebook.show_all ();
+
+	_the_notebook.signal_switch_page().connect ([this](GtkNotebookPage*, guint page) {
+			std::string label (_the_notebook.get_tab_label_text (*_the_notebook.get_nth_page (page)));
+			_notebook_tab1.set_active (label);
+			_notebook_tab2.set_active (label);
+			instant_save ();
+			});
+
+	_notebook_tab1.set_name ("tab button");
+	_notebook_tab2.set_name ("tab button");
 
 	build_edit_mode_menu();
 	build_zoom_focus_menu();
@@ -898,11 +950,19 @@ Editor::set_entered_regionview (RegionView* rv)
 		*/
 		sensitize_all_region_actions (true);
 	}
+
+	if (rv) {
+		set_entered_track (&rv->get_time_axis_view());
+	}
 }
 
 void
 Editor::set_entered_track (TimeAxisView* tav)
 {
+	if (entered_track == tav) {
+		return;
+	}
+
 	if (entered_track) {
 		entered_track->exited ();
 	}
@@ -2330,7 +2390,7 @@ Editor::get_state () const
 
 	node->add_child_nocopy (Tabbable::get_state());
 
-	node->set_property("edit-vertical-pane-pos", editor_summary_pane.get_divider());
+	node->set_property("edit-vertical-pane-size", editor_summary_pane.get_absolute_divider());
 
 	maybe_add_mixer_strip_width (*node);
 
@@ -2659,21 +2719,13 @@ Editor::setup_toolbar ()
 	mouse_mode_size_group->add_widget (mouse_draw_button);
 	mouse_mode_size_group->add_widget (mouse_content_button);
 
-	if (!Profile->get_mixbus()) {
-		mouse_mode_size_group->add_widget (zoom_in_button);
-		mouse_mode_size_group->add_widget (zoom_out_button);
-		mouse_mode_size_group->add_widget (full_zoom_button);
-		mouse_mode_size_group->add_widget (zoom_focus_selector);
-		mouse_mode_size_group->add_widget (tav_shrink_button);
-		mouse_mode_size_group->add_widget (tav_expand_button);
-		mouse_mode_size_group->add_widget (follow_playhead_button);
-		mouse_mode_size_group->add_widget (follow_edits_button);
-		mouse_mode_size_group->add_widget (_notebook_tab1);
-		mouse_mode_size_group->add_widget (_notebook_tab2);
-	} else {
-		mouse_mode_size_group->add_widget (zoom_preset_selector);
-		mouse_mode_size_group->add_widget (visible_tracks_selector);
-	}
+	mouse_mode_size_group->add_widget (zoom_focus_selector);
+	mouse_mode_size_group->add_widget (tav_shrink_button);
+	mouse_mode_size_group->add_widget (tav_expand_button);
+	mouse_mode_size_group->add_widget (follow_playhead_button);
+	mouse_mode_size_group->add_widget (follow_edits_button);
+	mouse_mode_size_group->add_widget (_notebook_tab1);
+	mouse_mode_size_group->add_widget (_notebook_tab2);
 
 	mouse_mode_size_group->add_widget (stretch_marker_cb);
 
@@ -2735,14 +2787,7 @@ Editor::setup_toolbar ()
 	act = ActionManager::get_action (X_("Editor"), X_("zoom-to-session"));
 	full_zoom_button.set_related_action (act);
 
-	if (ARDOUR::Profile->get_mixbus()) {
-		_zoom_box.pack_start (zoom_preset_selector, false, false);
-	} else {
-		_zoom_box.pack_start (zoom_out_button, false, false);
-		_zoom_box.pack_start (zoom_in_button, false, false);
-		_zoom_box.pack_start (full_zoom_button, false, false);
-		_zoom_box.pack_start (zoom_focus_selector, false, false);
-	}
+	_zoom_box.pack_start (zoom_focus_selector, false, false);
 
 	/* Track zoom buttons */
 	_track_box.set_spacing (2);
@@ -5173,7 +5218,7 @@ Editor::check_step_edit ()
 }
 
 bool
-Editor::scroll_press (Direction dir)
+Editor::scroll_press (GdkEventButton* ev, Direction dir)
 {
 	++_scroll_callbacks;
 
@@ -5204,7 +5249,7 @@ Editor::scroll_press (Direction dir)
 	if (!_scroll_connection.connected ()) {
 
 		_scroll_connection = Glib::signal_timeout().connect (
-			sigc::bind (sigc::mem_fun (*this, &Editor::scroll_press), dir), 100
+			sigc::bind (sigc::mem_fun (*this, &Editor::scroll_press), ev, dir), 100
 			);
 
 		_scroll_callbacks = 0;
@@ -5213,10 +5258,11 @@ Editor::scroll_press (Direction dir)
 	return true;
 }
 
-void
-Editor::scroll_release ()
+bool
+Editor::scroll_release (GdkEventButton* ev)
 {
 	_scroll_connection.disconnect ();
+	return true;
 }
 
 void
@@ -5572,8 +5618,6 @@ Editor::ui_parameter_changed (string parameter)
 	} else if (parameter == "use-note-bars-for-velocity") {
 		ArdourCanvas::Note::set_show_velocity_bars (UIConfiguration::instance().get_use_note_bars_for_velocity());
 		_track_canvas->request_redraw (_track_canvas->visible_area());
-	} else if (parameter == "use-note-color-for-velocity") {
-		/* handled individually by each MidiRegionView */
 	} else if (parameter == "show-selection-marker") {
 		update_ruler_visibility ();
 	}
@@ -5820,5 +5864,29 @@ ArdourCanvas::Duple
 Editor::upper_left() const
 {
 	return get_trackview_group ()->canvas_origin ();
+}
+
+void
+Editor::toggle_main ()
+{
+	/* this code requires removing the alignment that holds
+	 * content_att_bottom in order to function
+	 */
+#if 0
+	Gtk::Box* parent = dynamic_cast<Gtk::Box*> (content_att_bottom.get_parent());
+
+	if (content_main.is_visible()) {
+		content_main_vbox.remove (content_main);
+		if (parent) {
+			parent->set_child_packing (content_att_bottom, true, true, 0);
+		}
+	} else {
+		content_main_vbox.pack_start (content_main, true, true);
+		content_main_vbox.reorder_child (content_main, 1);
+		if (parent) {
+			parent->set_child_packing (content_att_bottom, false, false, 0);
+		}
+	}
+#endif
 }
 

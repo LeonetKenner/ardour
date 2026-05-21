@@ -96,6 +96,7 @@ AutomationLine::AutomationLine (const string&                   name,
 	:_name (name)
 	, _height (0)
 	, _line_color_name ("automation line")
+	, _sensitive_line_color (0x0)
 	, _insensitive_line_color (0x0)
 	, _view_index_offset (0)
 	, alist (al)
@@ -154,14 +155,6 @@ AutomationLine::set_sensitive (bool yn)
 	_sensitive = yn;
 
 	set_line_color (_line_color_name, _line_color_mod);
-
-	for (auto & cp : control_points) {
-		if (yn) {
-			cp->show();
-		} else {
-			cp->hide ();
-		}
-	}
 }
 
 timepos_t
@@ -193,11 +186,11 @@ AutomationLine::update_visibility ()
 			line->hide ();
 		}
 
-		if (_visible & ControlPoints) {
+		if (_sensitive && (_visible & ControlPoints)) {
 			for (auto & cp : control_points) {
 				cp->show ();
 			}
-		} else if (_visible & SelectedControlPoints) {
+		} else if (_sensitive && (_visible & SelectedControlPoints)) {
 			for (auto & cp : control_points) {
 				if (cp->selected()) {
 					cp->show ();
@@ -214,7 +207,7 @@ AutomationLine::update_visibility ()
 	} else {
 		line->hide ();
 		for (auto & cp : control_points) {
-			if (_visible & ControlPoints) {
+			if (_sensitive && (_visible & ControlPoints)) {
 				cp->show ();
 			} else {
 				cp->hide ();
@@ -304,7 +297,11 @@ AutomationLine::set_line_color (string const & color_name, string color_mod)
 	_line_color_mod = color_mod;
 
 	if (_sensitive) {
-		line->set_outline_color (UIConfiguration::instance().color (color_name));
+		if (_sensitive_line_color) {
+			line->set_outline_color (_sensitive_line_color);
+		} else {
+			line->set_outline_color (UIConfiguration::instance().color (color_name));
+		}
 	} else {
 		line->set_outline_color (_insensitive_line_color);
 	}
@@ -337,6 +334,12 @@ void
 AutomationLine::set_insensitive_line_color (uint32_t color)
 {
 	_insensitive_line_color = color;
+}
+
+void
+AutomationLine::set_sensitive_line_color (uint32_t color)
+{
+	_sensitive_line_color = color;
 }
 
 uint32_t
@@ -659,10 +662,14 @@ AutomationLine::ContiguousControlPoints::clamp_dt (timecnt_t const & dt, timepos
 	 */
 
 	possible_pos = max (possible_pos, Temporal::timepos_t (possible_pos.time_domain()));
-	possible_pos = min (possible_pos, line_limit);
 
-	possible_pos = max (possible_pos, before_x); // can't move later than following point
-	possible_pos = min (possible_pos, after_x);  // can't move earlier than preceding point
+	/* line_limit is exclusive
+	 * but the last event must be *within* the region boundaries, hence the decrement()
+	 */
+	possible_pos = min (possible_pos, line_limit.decrement());
+
+	possible_pos = max (possible_pos, before_x); // can't move earlier than preceding point
+	possible_pos = min (possible_pos, after_x);  // can't move later than following point
 
 	return (*reference_point->model())->when.distance (possible_pos);
 }
@@ -777,9 +784,15 @@ AutomationLine::drag_motion (timecnt_t const & pdt, float fraction, bool ignore_
 	 */
 
 	if (dt.is_negative() || (dt.is_positive() && !with_push)) {
-		const timepos_t line_limit = get_origin() + maximum_time() + _offset;
+		const timepos_t line_limit = maximum_time() + _offset;
 		for (auto const & ccp : contiguous_points){
 			dt = ccp->clamp_dt (dt, line_limit);
+		}
+		if (!_drag_points.front()->can_slide() || !_drag_points.back()->can_slide()) {
+			/* ControlPointDrag::motion only checks if grabbed point can slide
+			 * ensure we are not moving a x-locked point within a contiguous range
+			 */
+			dt = timecnt_t (0);
 		}
 	}
 
@@ -1093,8 +1106,11 @@ AutomationLine::set_selected_points (PointSelection const & points)
 
 	if (points.empty()) {
 		remove_visibility (SelectedControlPoints);
-	} else {
+	} else if (!(_visible & SelectedControlPoints)) {
 		add_visibility (SelectedControlPoints);
+	} else {
+		/* make sure points are visible when added to an existing selection */
+		update_visibility();
 	}
 
 	set_colors ();

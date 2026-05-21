@@ -215,7 +215,6 @@ public:
 	void load_from_application_api (const std::string& path);
 	void finish();
 
-	int copy_demo_sessions ();
 	int load_session (const std::string& path, const std::string& snapshot, std::string mix_template = std::string());
 	bool session_load_in_progress;
 	int build_session (std::string const& path, std::string const& snapshot, std::string const& session_template, ARDOUR::BusProfile const&, bool from_startup_fsm, bool unnamed, Temporal::TimeDomain domain);
@@ -273,6 +272,7 @@ public:
 
 	PublicEditor&	  the_editor() { return *editor;}
 	Mixer_UI* the_mixer() { return mixer; }
+	TriggerPage* the_trigger_page() { return trigger_page; }
 
 	Gtk::Menu* shared_popup_menu ();
 

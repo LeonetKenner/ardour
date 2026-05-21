@@ -201,7 +201,6 @@ CONFIG_VARIABLE (MeterType, meter_type_bus, "meter-type-bus", MeterPeak)
 
 CONFIG_VARIABLE (bool, try_autostart_engine, "try-autostart-engine", true)
 CONFIG_VARIABLE (bool, hide_dummy_backend, "hide-dummy-backend", true)
-CONFIG_VARIABLE (bool, copy_demo_sessions, "copy-demo-sessions", true)
 CONFIG_VARIABLE (std::string, auditioner_output_left, "auditioner-output-left", "default")
 CONFIG_VARIABLE (std::string, auditioner_output_right, "auditioner-output-right", "default")
 CONFIG_VARIABLE (bool, replicate_missing_region_channels, "replicate-missing-region-channels", true)
@@ -238,7 +237,7 @@ CONFIG_VARIABLE (samplecnt_t, range_location_minimum, "range-location-minimum", 
 CONFIG_VARIABLE (EditMode, edit_mode, "edit-mode", Slide)
 CONFIG_VARIABLE (RippleMode, ripple_mode, "ripple-mode", RippleSelected)
 CONFIG_VARIABLE (Temporal::TimeDomain, default_automation_time_domain, "default-automation-time-domain", Temporal::AudioTime)
-CONFIG_VARIABLE (ARDOUR::AnyTime, default_quantization, "default-quantization", ARDOUR::AnyTime (Temporal::BBT_Offset (1, 0, 0)))
+CONFIG_VARIABLE (ARDOUR::AnyTime, default_quantization, "default-quantization", ARDOUR::AnyTime (Temporal::BBT_Offset (0, 1, 0)))
 CONFIG_VARIABLE (bool, mark_at_pgm_change, "mark-at-pgm-change", true)
 CONFIG_VARIABLE (bool, locate_to_pgm_change, "locate-to-pgm-change", true)
 
@@ -286,6 +285,7 @@ CONFIG_VARIABLE (std::string, reference_manual_url, "reference-manual-url", "htt
 CONFIG_VARIABLE (std::string, updates_url, "updates-url", "http://ardour.org/whatsnew.html")
 CONFIG_VARIABLE (std::string, donate_url, "donate-url", "http://community.ardour.org/donate")
 CONFIG_VARIABLE (std::string, resource_index_url, "resource-index-url", "http://ardour.org/libraries.xml")
+CONFIG_VARIABLE (std::string, demo_session_index_url, "demo-session-index-url", "")
 
 /* video timeline configuration */
 CONFIG_VARIABLE (std::string, xjadeo_binary, "xjadeo-binary", "")

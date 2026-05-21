@@ -28,11 +28,12 @@ WITH_NLS=1
 X42PLUGINS="x42-autotune x42-midifilter x42-stereoroute setBfree x42-avldrums x42-limiter x42-tuner"
 CURLOPT="-s -S --retry-connrefused --retry 3"
 
-: ${HARRISONCHANNELSTRIP=harrison_channelstrip}
+. ../define_versions.sh
+
+: ${HARRISONCHANNELSTRIP=harrison_channelstrip${major_version}}
 : ${HARRISONLV2=harrison_lv2s-n}
 : ${HARRISONDSPURL=https://builder.harrisonconsoles.com/pub/dsp}
 
-. ../define_versions.sh
 
 while [ $# -gt 0 ] ; do
 	echo "arg = $1"
@@ -405,6 +406,9 @@ rm $MediaClips/wscript
 for x in $BUILD_ROOT/../share/mcp/*.device $BUILD_ROOT/../share/mcp/*.profile ; do
 	cp "$x" $MackieControl
 done
+
+# Chord data
+cp $BUILD_ROOT/../share/chords.txt $Shared
 
 # OSC data
 # got to be careful with names here
@@ -913,17 +917,6 @@ if test -n "$MIXBUS"; then
 
 fi
 ################################################################################
-
-if test x$DEMO_SESSION_URL != x ; then
-	mkdir -p ${PRODUCT_PKG_DIR}/$Shared/sessions
-	DEMO_SESSIONS=$(curl ${CURLOPT} --fail $DEMO_SESSION_URL/index.txt)
-	for demo in $DEMO_SESSIONS; do
-		curl ${CURLOPT} --fail -# -o ${PRODUCT_PKG_DIR}/$Shared/sessions/$demo $DEMO_SESSION_URL/$demo
-	done
-fi
-
-################################################################################
-
 
 
 ##### App Signing ##############################################################

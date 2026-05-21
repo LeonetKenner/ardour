@@ -52,34 +52,32 @@ using namespace Temporal;
 
 static double const lollipop_radius = 6.0;
 
-VelocityDisplay::VelocityDisplay (EditingContext& ec, MidiViewBackground& background, MidiView& mv, ArdourCanvas::Rectangle& base_rect, ArdourCanvas::Container& lc,
+VelocityDisplay::VelocityDisplay (EditingContext& ec, MidiViewBackground& background, MidiView& mv, ArdourCanvas::Rectangle& base_rect, 
                                   GhostEvent::EventList& el, Gtkmm2ext::Color oc)
 	: editing_context (ec)
 	, bg (background)
 	, view (mv)
 	, base (base_rect)
-	, lolli_container (&lc)
 	, events (el)
 	, _outline (oc)
 	, dragging (false)
 	, dragging_line (nullptr)
 	, last_drag_x (-1)
 	, drag_did_change (false)
-	, selected (false)
 	, _optimization_iterator (events.end())
-	, _sensitive (false)
+	, _sensitive (true)
 {
 	base.set_data (X_("ghostregionview"), this);
 	base_connection = base.Event.connect (sigc::mem_fun (*this, &VelocityDisplay::base_event));
 	base.set_fill_color (UIConfiguration::instance().color_mod ("ghost track base", "ghost track midi fill"));
 	base.set_outline_color (UIConfiguration::instance().color ("automation track outline"));
 	base.set_outline (true);
+	/* XXX this is likely wrong for the pianoroll case */
 	base.set_outline_what (ArdourCanvas::Rectangle::What (ArdourCanvas::Rectangle::LEFT|ArdourCanvas::Rectangle::RIGHT));
 }
 
 VelocityDisplay::~VelocityDisplay ()
 {
-	base_connection.disconnect ();
 }
 
 bool
@@ -179,10 +177,10 @@ VelocityDisplay::sensitive () const
 void
 VelocityDisplay::add_note (NoteBase* nb)
 {
-	ArdourCanvas::Lollipop* l = new ArdourCanvas::Lollipop (lolli_container);
+	ArdourCanvas::Lollipop* l = new ArdourCanvas::Lollipop (&base);
 	l->set_bounding_parent (&base);
 
-	GhostEvent* event = new GhostEvent (nb, lolli_container, l);
+	GhostEvent* event = new GhostEvent (nb, l);
 	events.insert (std::make_pair (nb->note(), event));
 
 	l->Event.connect (sigc::bind (sigc::mem_fun (*this, &VelocityDisplay::lollevent), event));
@@ -306,7 +304,7 @@ VelocityDisplay::drag_lolli (ArdourCanvas::Lollipop* l, GdkEventMotion* ev)
 			   (yet), we have to use the static method to compute
 			   the color.
 			*/
-			lolli->set_fill_color (NoteBase::base_color (newvel, bg.color_mode(), bg.region_color(), x->event->note()->channel(), true));
+			lolli->set_fill_color (NoteBase::base_color (s->note()->note(), newvel, bg.color_mode(), bg.region_color(), x->event->note()->channel(), true));
 
 			if (l == lolli) {
 				/* This is the value we will display */
@@ -457,22 +455,11 @@ VelocityDisplay::sensitize_lollis ()
 }
 
 void
-VelocityDisplay::set_selected (bool yn)
-{
-	selected = yn;
-	set_colors ();
-
-	if (yn) {
-		base.parent()->raise_to_top ();
-	}
-}
-
-void
 VelocityDisplay::hide ()
 {
-	if (lolli_container) {
-		lolli_container->hide ();
-		lolli_container->set_ignore_events (true);
+	for (auto & gev : events) {
+		gev.second->item->hide ();
+		gev.second->item->set_ignore_events (false);
 	}
 
 }
@@ -480,8 +467,8 @@ VelocityDisplay::hide ()
 void
 VelocityDisplay::show ()
 {
-	if (lolli_container) {
-		lolli_container->show ();
-		lolli_container->set_ignore_events (false);
+	for (auto & gev : events) {
+		gev.second->item->show ();
+		gev.second->item->set_ignore_events (true);
 	}
 }

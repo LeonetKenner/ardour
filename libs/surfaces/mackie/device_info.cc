@@ -70,6 +70,7 @@ DeviceInfo::DeviceInfo()
 	, _has_meters (true)
 	, _has_separate_meters (false)
 	, _single_fader_follows_selection (false)
+	, _follows_selection (true)
 	, _device_type (MCU)
 #ifdef UF8
 	, _name (X_("UF8"))
@@ -274,6 +275,12 @@ DeviceInfo::set_state (const XMLNode& node, int /* version */)
 		child->get_property ("value", _single_fader_follows_selection);
 	} else {
 		_single_fader_follows_selection = false;
+	}
+
+	if ((child = node.child ("FollowsSelection")) != 0) {
+		child->get_property ("value", _follows_selection);
+	} else {
+		_follows_selection = true;
 	}
 
 	if ((child = node.child ("Extenders")) != 0) {
@@ -497,6 +504,12 @@ DeviceInfo::single_fader_follows_selection() const
 }
 
 bool
+DeviceInfo::follows_selection() const
+{
+	return _follows_selection;
+}
+
+bool
 DeviceInfo::has_separate_meters() const
 {
 	return _has_separate_meters;
@@ -666,6 +679,12 @@ DeviceInfo::reload_device_info ()
 			device_info[di.name()] = di;
 		}
 	}
+}
+
+void
+DeviceInfo::set_follows_selection (bool yn)
+{
+	_follows_selection = yn;
 }
 
 std::ostream& operator<< (std::ostream& os, const MACKIE_NAMESPACE::DeviceInfo& di)

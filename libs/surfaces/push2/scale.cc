@@ -16,6 +16,11 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
+
+#if defined COMPILER_MSVC && defined WAF_BUILD
+#define NOMINMAX
+#endif
+
 #include "gtkmm2ext/gui_thread.h"
 
 #include "gtkmm2ext/colors.h"
@@ -689,7 +694,7 @@ ScaleLayout::show_fixed_state ()
 void
 ScaleLayout::mode_changed ()
 {
-	MusicalMode::Type m = (MusicalMode::Type) _scale_menu->active();
+	MusicalMode::Name m = (MusicalMode::Name) _scale_menu->active();
 	_p2.set_pad_scale (_p2.scale_root (),
 	                   _p2.root_octave (),
 	                   m,

@@ -197,6 +197,7 @@ Session::Session (AudioEngine &eng,
                   bool unnamed,
                   samplecnt_t sr)
 	: HistoryOwner (X_("editor"))
+	, ScaleProvider (nullptr)
 	,  _playlists (new SessionPlaylists)
 	, _engine (eng)
 	, process_function (&Session::process_with_events)
@@ -373,6 +374,8 @@ Session::Session (AudioEngine &eng,
 	_update_pretty_names.store (0);
 	_seek_counter.store (0);
 	_butler_seek_counter.store (0);
+
+	ScaleProvider::set_key (MusicalKey (440.0, ARDOUR::MusicalMode (ARDOUR::MusicalMode::IonianMajor)));
 
 	created_with = string_compose ("%1 %2", PROGRAM_NAME, revision);
 
@@ -2239,9 +2242,34 @@ Session::enable_record ()
 }
 
 void
-Session::set_all_tracks_record_enabled (bool enable )
+Session::set_all_tracks_record_enabled (bool enable)
 {
 	set_controls (route_list_to_control_list (routes.reader (), &Stripable::rec_enable_control), enable, Controllable::NoGroup);
+}
+
+void
+Session::toggle_all_tracks_record_enabled ()
+{
+	std::shared_ptr<AutomationControlList> acl (route_list_to_control_list (routes.reader (), &Stripable::rec_enable_control));
+	bool any_disarmed = false;
+	bool any_armed = false;
+
+	for (auto const & c : *acl) {
+		if (c->get_value()) {
+			any_armed = true;
+		} else {
+			any_disarmed = true;
+		}
+	}
+
+	if (any_armed && any_disarmed) {
+		/* inconsistent, do disable */
+		set_controls (acl, false, Controllable::NoGroup);
+	} else if (any_armed) {
+		set_controls (acl, false, Controllable::NoGroup);
+	} else if (any_disarmed) {
+		set_controls (acl, true, Controllable::NoGroup);
+	}
 }
 
 void

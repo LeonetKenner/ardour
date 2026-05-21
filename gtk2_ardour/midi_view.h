@@ -42,6 +42,7 @@
 #include "boundary.h"
 #include "editing.h"
 #include "region_view.h"
+#include "midi_selection.h"
 #include "midi_view_background.h"
 #include "time_axis_view_item.h"
 #include "editor_automation_line.h"
@@ -89,13 +90,14 @@ class MidiView : public virtual sigc::trackable, public LineMerger
 	MidiView (std::shared_ptr<ARDOUR::MidiTrack> mt,
 	          ArdourCanvas::Item&      parent,
 	          EditingContext&          ec,
-	          MidiViewBackground&      bg,
-	          uint32_t                 basic_color);
+	          MidiViewBackground&      bg);
 	MidiView (MidiView const & other);
 
 	virtual ~MidiView ();
 
 	void init (bool wfd);
+
+	void set_sensitive (bool);
 
 	virtual void set_samples_per_pixel (double) {};
 
@@ -111,7 +113,7 @@ class MidiView : public virtual sigc::trackable, public LineMerger
 
 	// inline ARDOUR::ColorMode color_mode() const { return _background->color_mode(); }
 
-	void color_handler ();
+	virtual void color_handler ();
 
 	void show_step_edit_cursor (Temporal::Beats pos);
 	void move_step_edit_cursor (Temporal::Beats pos);
@@ -205,6 +207,8 @@ class MidiView : public virtual sigc::trackable, public LineMerger
 	void apply_note_diff (bool as_subcommand = false, bool was_copy = false);
 	void abort_note_diff();
 
+	NoteBase* entered_note() const { return _entered_note; }
+
 	void   note_entered(NoteBase* ev);
 	void   note_left(NoteBase* ev);
 	void   patch_entered (PatchChange *);
@@ -223,6 +227,11 @@ class MidiView : public virtual sigc::trackable, public LineMerger
 	void   invert_selection ();
 	void   extend_selection ();
 	void   duplicate_selection ();
+
+	void replace_chord (std::vector<int> const & intervals);
+	void invert_selected_chord (bool up);
+	void drop_selected_chord (std::vector<int> const & which_notes);
+	void add_semitone_interval (int semitones, bool as_subcommand = false);
 
 	Temporal::Beats earliest_in_selection ();
 	void move_selection(Temporal::timecnt_t const & dx, double dy, double cumulative_dy);
@@ -312,12 +321,14 @@ class MidiView : public virtual sigc::trackable, public LineMerger
 	bool maybe_set_note_range (uint8_t low, uint8_t high);
 	virtual void set_visibility_note_range (MidiViewBackground::VisibleNoteRange, bool);
 
-	typedef std::set<NoteBase*> Selection;
+	typedef SimpleMidiNoteSelection Selection;
 	Selection const & selection () const {
 		return _selection;
 	}
+	sigc::signal<void> SelectionChanged;
 
 	void selection_as_notelist (Notes& selected, bool allow_all_if_none_selected = false);
+	void selection_as_notevector (std::vector<std::shared_ptr<NoteType> > & selected, bool allow_all_if_none_selected = false);
 
 	void set_channel_selector_scoped_note(NoteBase* note){ _channel_selection_scoped_note = note; }
 	NoteBase* channel_selector_scoped_note(){  return _channel_selection_scoped_note; }
@@ -359,6 +370,7 @@ class MidiView : public virtual sigc::trackable, public LineMerger
 	void show_end (bool yn);
 
 	virtual bool midi_canvas_group_event(GdkEvent* ev);
+	virtual bool note_group_event(GdkEvent* ev);
 
 	int visible_channel() const { return _visible_channel; }
 	void set_visible_channel (int, bool clear_selection = true);
@@ -376,6 +388,7 @@ class MidiView : public virtual sigc::trackable, public LineMerger
 
 	void redisplay (bool view_only);
 	bool note_editable (NoteBase const *) const;
+	bool should_be_editable (NoteBase const *) const;
 
   protected:
 	friend class EditingContext;
@@ -461,7 +474,7 @@ class MidiView : public virtual sigc::trackable, public LineMerger
 	 */
 	void clear_selection_internal ();
 
-	void clear_events ();
+	virtual void clear_events ();
 	virtual void clear_ghost_events() {}
 	virtual void ghosts_model_changed() {}
 	virtual void ghosts_view_changed() {}
@@ -488,7 +501,7 @@ class MidiView : public virtual sigc::trackable, public LineMerger
 	void trim_note(NoteBase* ev, ARDOUR::MidiModel::TimeType start_delta,
 	               ARDOUR::MidiModel::TimeType end_delta);
 
-	void update_drag_selection (Temporal::timepos_t const & start, Temporal::timepos_t const & end, double y0, double y1, bool extend);
+	bool update_drag_selection (Temporal::timepos_t const & start, Temporal::timepos_t const & end, double y0, double y1, bool extend, bool drag_in_progress);
 	void update_vertical_drag_selection (double last_y, double y, bool extend);
 
 	void add_to_selection (NoteBase*);
@@ -535,6 +548,7 @@ class MidiView : public virtual sigc::trackable, public LineMerger
 	Drag*                                 selection_drag;
 	Drag*                                 draw_drag;
 	int                                  _visible_channel;
+	bool                                 _sensitive;
 
 	/** Currently selected NoteBase objects */
 	Selection _selection;
@@ -616,6 +630,8 @@ class MidiView : public virtual sigc::trackable, public LineMerger
 
 	bool _mouse_changed_selection;
 
+	bool _suspend_note_range_update;
+
 	Gtkmm2ext::Color _patch_change_outline;
 	Gtkmm2ext::Color _patch_change_fill;
 
@@ -690,5 +706,6 @@ class MidiView : public virtual sigc::trackable, public LineMerger
 	bool show_context_menu (GdkEventButton*);
 
 	void _duplicate_notes (int times);
-
+	bool chord_is_selected () const;
+	void selection_changed ();
 };

@@ -59,7 +59,8 @@ private:
 		RIGHT,
 		BOTTOM,
 		INSIDE,
-		TO_LEFT_OR_RIGHT
+		TO_LEFT_OR_RIGHT,
+		TOOLBAR
 	};
 
 	void on_size_request (Gtk::Requisition *);
@@ -94,6 +95,8 @@ private:
 
 	void summary_zoom_step (  int steps );
 
+	int get_variable_width ();
+
 	samplepos_t _start; ///< start sample of the overview
 	samplepos_t _end; ///< end sample of the overview
 
@@ -114,6 +117,10 @@ private:
 
 	void set_colors ();
 	uint32_t _phead_color;
+	uint32_t _background_color;
+	uint32_t _track_color;
+	uint32_t _marker_color;
+	uint32_t _viewrect_color;
 
 	//used for zooming
 	int _last_mx;
@@ -137,8 +144,10 @@ private:
 	void render_background_image ();
 	bool _background_dirty;
 
+	int _toolbar_width;
+	int _toolbar_height;
+
 	PBD::ScopedConnectionList position_connection;
 	PBD::ScopedConnection route_ctrl_id_connection;
 	PBD::ScopedConnectionList region_property_connection;
 };
-

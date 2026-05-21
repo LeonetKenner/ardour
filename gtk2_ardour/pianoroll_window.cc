@@ -24,9 +24,12 @@
 #include "gtkmm2ext/doi.h"
 
 #include "ardour_ui.h"
+#include "chord_box.h"
 #include "pianoroll.h"
 #include "pianoroll_window.h"
 #include "region_editor.h"
+
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 
@@ -36,7 +39,10 @@ PianorollWindow::PianorollWindow (std::string const & name, Session& s)
 	, region_editor (nullptr)
 {
 	pianoroll->set_session (&s);
-	pianoroll->get_canvas_viewport()->set_size_request (1270, 700);
+	set_default_size (1270, 700);
+
+	hpacker.pack_start (pianoroll->contents(), true, true);
+	pianoroll->contents().show ();
 
 	add (hpacker);
 	hpacker.show ();
@@ -55,18 +61,30 @@ PianorollWindow::set_show_source (bool yn)
 }
 
 void
-PianorollWindow::set (std::shared_ptr<MidiTrack> track, std::shared_ptr<MidiRegion> region)
+PianorollWindow::add_region (std::shared_ptr<MidiTrack> track, std::shared_ptr<MidiRegion> region)
 {
-	pianoroll->set_track (track);
+	pianoroll->add_region (region, track);
+}
+
+void
+PianorollWindow::set_region (std::shared_ptr<MidiTrack> track, std::shared_ptr<MidiRegion> region)
+{
+	pianoroll->add_region (region, track);
 	pianoroll->set_region (region);
 
-	delete region_editor;
-	region_editor = new RegionEditor (pianoroll->session(), region);
-	hpacker.pack_start (*region_editor, false, false);
-	hpacker.pack_start (pianoroll->contents(), true, true);
+	set_title (string_compose (_("%1 Pianoroll: %2"), PROGRAM_NAME, region->name()));
+}
 
-	region_editor->show ();
-	pianoroll->contents().show ();
+void
+PianorollWindow::replace_region (std::shared_ptr<MidiTrack> track, std::shared_ptr<MidiRegion> region)
+{
+	pianoroll->replace_region (region, track);
+}
+
+void
+PianorollWindow::remove_regions ()
+{
+	pianoroll->remove_regions ();
 }
 
 bool
@@ -78,6 +96,6 @@ PianorollWindow::on_key_press_event (GdkEventKey* ev)
 bool
 PianorollWindow::on_delete_event (GdkEventAny*)
 {
-	delete_when_idle (this);
+	hide ();
 	return true;
 }

@@ -1630,7 +1630,7 @@ class ControlSurfacesOptions : public OptionEditorMiniPage
 			_store->clear ();
 
 			ControlProtocolManager& m = ControlProtocolManager::instance ();
-			for (auto const& i : m.control_protocol_info) {
+			for (auto const& i : m.control_protocol_infos ()) {
 				TreeModel::Row r = *_store->append ();
 				r[_model.name] = i->name;
 				r[_model.enabled] = 0 != i->protocol;
@@ -2772,23 +2772,6 @@ RCOptionEditor::RCOptionEditor ()
 		     sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_never_display_periodic_midi)
 		     ));
 
-
-	add_option (_("Appearance/Editor"),
-	            new BoolOption (
-		            "use-note-bars-for-velocity",
-		            _("Show velocity horizontally inside notes"),
-		            sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_use_note_bars_for_velocity),
-		            sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_use_note_bars_for_velocity)
-		            ));
-
-	add_option (_("Appearance/Editor"),
-	            new BoolOption (
-		            "use-note-color-for-velocity",
-		            _("Use colors to show note velocity"),
-		            sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_use_note_color_for_velocity),
-		            sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_use_note_color_for_velocity)
-		            ));
-
 	ComboOption<Editing::NoteNameDisplay>* nnd = new ComboOption<Editing::NoteNameDisplay> (
 		"note-name-display",
 		_("Display note names in MIDI track headers"),
@@ -3123,7 +3106,7 @@ These settings will only take effect after %1 is restarted.\n\
 #if !(defined PLATFORM_WINDOWS || defined __APPLE__)
 	bo = new BoolOption (
 			"allow-to-resize-init-dialog",
-			_("Allow resizing of session and engine dialogs"),
+			_("Allow resizing of the engine dialogs"),
 			sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_allow_to_resize_init_dialog),
 			sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_allow_to_resize_init_dialog)
 			);
@@ -3594,6 +3577,27 @@ These settings will only take effect after %1 is restarted.\n\
 
 	add_option (_("MIDI"), new OptionEditorHeading (_("Editing")));
 
+	add_option (_("Appearance/Editor"),
+	            new BoolOption (
+		            "use-note-bars-for-velocity",
+		            _("Show velocity horizontally inside notes"),
+		            sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_use_note_bars_for_velocity),
+		            sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_use_note_bars_for_velocity)
+		            ));
+
+	auto midi_color_mode = new ComboOption<ARDOUR::ColorMode> (
+		"default-midi-note-color-mode",
+		_("Default MIDI note colors"),
+		sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_default_midi_note_color_mode),
+		sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_default_midi_note_color_mode)
+		);
+
+	midi_color_mode->add (ARDOUR::MeterColors, _("Velocity"));
+	midi_color_mode->add (ARDOUR::PitchColors, _("Pitch"));
+	midi_color_mode->add (ARDOUR::ChannelColors, _("Channel"));
+	midi_color_mode->add (ARDOUR::TrackColor, _("Track"));
+
+	add_option (_("MIDI"), midi_color_mode);
 	add_option (_("MIDI"),
 	     new BoolOption (
 		     "select-last-drawn-note-only",

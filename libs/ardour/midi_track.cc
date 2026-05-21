@@ -445,7 +445,11 @@ MidiTrack::non_realtime_locate (samplepos_t spos)
 
 	Track::non_realtime_locate (spos);
 
+	/* always clear this state on every locate */
+	_disk_reader->clear_midi_chase ();
+
 	std::shared_ptr<MidiPlaylist> playlist = _disk_writer->midi_playlist();
+
 	if (!playlist) {
 		return;
 	}
@@ -477,18 +481,26 @@ MidiTrack::non_realtime_locate (samplepos_t spos)
 	for (Controls::const_iterator c = _controls.begin(); c != _controls.end(); ++c) {
 
 		std::shared_ptr<AutomationControl> ac = std::dynamic_pointer_cast<AutomationControl> (c->second);
+		std::shared_ptr<MidiTrack::MidiControl> tcontrol (std::dynamic_pointer_cast<MidiTrack::MidiControl>(c->second));
 
-		if (!ac->automation_playback()) {
+		/* MidiTrack::MidiControl has no automation list, which will
+		 * make AutomationControl::automation_playback() always return
+		 * false. In fact, this sort of AutomationControl is always
+		 * active because it represented MIDI data present in the
+		 * track/regions/sources.
+		 *
+		 * So, if this a MidiTrack::MidiControl or it isn't and it
+		 * isn't set for automation playback, we can ignore
+		 * it. Otherwise, proceed.
+		 */
+
+		if (!tcontrol && !ac->automation_playback()) {
 			continue;
 		}
 
-		std::shared_ptr<MidiTrack::MidiControl> tcontrol;
-		std::shared_ptr<Evoral::Control>        rcontrol;
+		std::shared_ptr<Evoral::Control> rcontrol;
 
-		if ((tcontrol = std::dynamic_pointer_cast<MidiTrack::MidiControl>(c->second)) &&
-
-		    (rcontrol = region->control(tcontrol->parameter()))) {
-
+		if (tcontrol && (rcontrol = region->control (tcontrol->parameter()))) {
 			if (rcontrol->list()->size() > 0) {
 				tcontrol->set_value(rcontrol->list()->eval(pos_beats), Controllable::NoGroup);
 			}
@@ -662,8 +674,15 @@ MidiTrack::set_note_mode (NoteMode m)
 std::string
 MidiTrack::describe_parameter (Evoral::Parameter param)
 {
-	const std::string str(instrument_info().get_controller_name(param));
-	return str.empty() ? Automatable::describe_parameter(param) : str;
+	const std::string str(instrument_info().get_controller_name (param, false));
+	return str.empty() ? Automatable::describe_parameter (param) : str;
+}
+
+std::string
+MidiTrack::get_parameter_name (Evoral::Parameter param)
+{
+	const std::string str(instrument_info().get_controller_name (param, true));
+	return str.empty() ? Automatable::get_parameter_name (param) : str;
 }
 
 void

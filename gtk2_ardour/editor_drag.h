@@ -140,6 +140,9 @@ public:
 	/** return drag-motion displays video-frame of drag-location */
 	bool preview_video () const;
 
+	bool dragging_lollipop () const;
+	std::list<Drag*> const & drags() const { return _drags; }
+
 private:
 	EditingContext* _editing_context;
 	std::list<Drag*> _drags;
@@ -147,7 +150,6 @@ private:
 	double _current_pointer_x; ///< canvas-coordinate space x of the current pointer
 	double _current_pointer_y; ///< canvas-coordinate space y of the current pointer
 	Temporal::timepos_t _current_pointer_time; ///< time that the pointer is now at
-	bool _old_follow_playhead; ///< state of Editor::follow_playhead() before the drags started
 };
 
 /** Abstract base class for dragging of things within the editor */
@@ -161,9 +163,8 @@ public:
 		_drags = m;
 	}
 
-	void set_bounding_item (ArdourCanvas::Item const * i) {
-		_bounding_item = i;
-	}
+	ArdourCanvas::Item const * bounding_item() const { return _bounding_item; }
+	void set_bounding_item (ArdourCanvas::Item const * i);
 
 	/** @return the canvas item being dragged */
 	ArdourCanvas::Item* item () const {

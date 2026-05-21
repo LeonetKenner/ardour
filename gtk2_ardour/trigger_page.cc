@@ -66,7 +66,7 @@ using namespace Gtk;
 using namespace std;
 
 TriggerPage::TriggerPage ()
-	: Tabbable (_("Cues"), X_("trigger"), NULL, true, Tabbable::PaneLayout (Tabbable::PaneRight | Tabbable::PaneBottom))
+	: Tabbable (_("Cues"), X_("trigger"), NULL, true, Tabbable::PaneLayout (Tabbable::PaneRight | Tabbable::AttBottom))
 	, _cue_area_frame (0.5, 0, 1.0, 0)
 	, _cue_box (16, 16 * TriggerBox::default_triggers_per_box)
 	, _master_widget (16, 16)
@@ -144,7 +144,8 @@ TriggerPage::TriggerPage ()
 
 	_sidebar_pager2.set_index (3);
 
-	_midi_editor = new Pianoroll (X_("MIDICueEditor"));
+	/* args: no transport controls, non-expandable, single region */
+	_midi_editor = new Pianoroll (X_("MIDICueEditor"), false, false, true);
 	_audio_editor = new AudioClipEditor (X_("AudioClipEditor"));
 
 	_audio_editor->get_canvas_viewport()->set_size_request (1, 1);

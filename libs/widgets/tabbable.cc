@@ -25,6 +25,10 @@
 #include <ytkmm/stock.h>
 #include <ytkmm/table.h>
 
+#if defined COMPILER_MSVC && defined WAF_BUILD
+#define NOMINMAX
+#endif
+
 #include "gtkmm2ext/actions.h"
 #include "gtkmm2ext/gtk_ui.h"
 #include "gtkmm2ext/utils.h"
@@ -142,6 +146,11 @@ Tabbable::default_layout ()
 		content_bottom_pane.add (content_att_bottom);
 	} else {
 		content_inner_hbox.pack_start (content_main_vbox, true, true);
+
+		/* This alignment appears to be used *only* to add 5px of
+		 * padding at the top of content_att_bottom, to match the space
+		 * the pane divider would take in the if() clause above.
+		 */
 
 		Gtk::Alignment* btm_align = manage (new Gtk::Alignment());
 		btm_align->set_padding (5, 0, 0, 0); // 5px at top
@@ -581,8 +590,14 @@ void
 Tabbable::showhide_att_bottom (bool yn)
 {
 	if (yn) {
+		if (!(_panelayout & PaneBottom)) {
+			content_att_bottom.get_parent()->show ();
+		}
 		content_att_bottom.show ();
 	} else {
+		if (!(_panelayout & PaneBottom)) {
+			content_att_bottom.get_parent()->hide ();
+		}
 		content_att_bottom.hide ();
 	}
 
@@ -630,3 +645,4 @@ Tabbable::should_show_att_bottom ()
 
 	return false;
 }
+

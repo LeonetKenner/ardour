@@ -66,9 +66,10 @@ EditorSummary::EditorSummary (Editor& e)
 	  _zoom_trim_dragging (false),
 	  _old_follow_playhead (false),
 	  _image (0),
-	  _background_dirty (true)
+	  _background_dirty (true),
+	  _toolbar_width(0),
+	  _toolbar_height(0)
 {
-	CairoWidget::use_nsglview (UIConfiguration::instance().get_nsgl_view_mode () == NSGLHiRes);
 	add_events (Gdk::POINTER_MOTION_MASK|Gdk::KEY_PRESS_MASK|Gdk::KEY_RELEASE_MASK|Gdk::ENTER_NOTIFY_MASK|Gdk::LEAVE_NOTIFY_MASK);
 	set_can_focus ();
 
@@ -96,6 +97,11 @@ void
 EditorSummary::on_size_allocate (Gtk::Allocation& alloc)
 {
 	CairoWidget::on_size_allocate (alloc);
+	if (get_child ()) {
+		Gtk::Requisition child_req = get_child()->size_request ();
+		_toolbar_width = child_req.width;
+		_toolbar_height = child_req.height;
+	}
 	set_background_dirty ();
 }
 
@@ -142,7 +148,7 @@ EditorSummary::render_background_image ()
 
 	/* background (really just the dividing lines between tracks */
 
-	cairo_set_source_rgb (cr, 0, 0, 0);
+	Gtkmm2ext::set_source_rgba (cr, _background_color);
 	cairo_rectangle (cr, 0, 0, get_width(), get_height());
 	cairo_fill (cr);
 
@@ -164,7 +170,7 @@ EditorSummary::render_background_image ()
 
 	/* calculate x scale */
 	if (_end != _start) {
-		_x_scale = static_cast<double> (get_width()) / (_end - _start);
+		_x_scale = static_cast<double> (get_variable_width()) / (_end - _start);
 	} else {
 		_x_scale = 1;
 	}
@@ -180,7 +186,8 @@ EditorSummary::render_background_image ()
 	if (N == 0) {
 		_track_height = 16;
 	} else {
-		_track_height = (double) get_height() / N;
+		// add 2 px to the total height to merge track borders with the summary's frame border
+		_track_height = (double) (get_height() + 2) / N;
 	}
 
 	/* render tracks and regions */
@@ -195,10 +202,10 @@ EditorSummary::render_background_image ()
 		/* paint a non-bg colored strip to represent the track itself */
 
 		if (_track_height > 4) {
-			cairo_set_source_rgb (cr, 0.2, 0.2, 0.2);
+			Gtkmm2ext::set_source_rgba (cr, _track_color);
 			cairo_set_line_width (cr, _track_height - 1);
-			cairo_move_to (cr, 0, y + _track_height / 2);
-			cairo_line_to (cr, get_width(), y + _track_height / 2);
+			cairo_move_to (cr, 0, y + _track_height / 2 - 1);
+			cairo_line_to (cr, get_width(), y + _track_height / 2 - 1);
 			cairo_stroke (cr);
 		}
 
@@ -210,7 +217,7 @@ EditorSummary::render_background_image ()
 			s->foreach_regionview (sigc::bind (
 			                                   sigc::mem_fun (*this, &EditorSummary::render_region),
 			                                   cr,
-			                                   y + _track_height / 2
+			                                   y + _track_height / 2 - 1
 			                                  ));
 		}
 
@@ -220,13 +227,13 @@ EditorSummary::render_background_image ()
 	/* start and end markers */
 
 	cairo_set_line_width (cr, 1);
-	cairo_set_source_rgb (cr, 1, 1, 0);
+	Gtkmm2ext::set_source_rgba (cr, _marker_color);
 
-	const double p = (_session->current_start_sample() - _start) * _x_scale;
+	const double p = 0.5 + round((_session->current_start_sample() - _start) * _x_scale);
 	cairo_move_to (cr, p, 0);
 	cairo_line_to (cr, p, get_height());
 
-	double const q = (_session->current_end_sample() - _start) * _x_scale;
+	double const q = 0.5 + round((_session->current_end_sample() - _start) * _x_scale);
 	cairo_move_to (cr, q, 0);
 	cairo_line_to (cr, q, get_height());
 	cairo_stroke (cr);
@@ -283,13 +290,13 @@ EditorSummary::render (Cairo::RefPtr<Cairo::Context> const& ctx, cairo_rectangle
 
 	int32_t width = _view_rectangle_x.second - _view_rectangle_x.first;
 	cairo_rectangle (cr, _view_rectangle_x.first, 0, width, get_height ());
-	cairo_set_source_rgba (cr, 1, 1, 1, 0.15);
+	Gtkmm2ext::set_source_rgba (cr, _viewrect_color);
 	cairo_fill (cr);
 
 	/* horiz zoom */
-	cairo_rectangle (cr, _view_rectangle_x.first, 0, width, get_height ());
+	cairo_rectangle (cr, _view_rectangle_x.first + 0.5, 0.5, width - 1, get_height () - 1);
 	cairo_set_line_width (cr, 1);
-	cairo_set_source_rgba (cr, 1, 1, 1, 0.9);
+	cairo_set_source_rgba (cr, UINT_RGBA_R_FLT(_viewrect_color), UINT_RGBA_G_FLT(_viewrect_color), UINT_RGBA_B_FLT(_viewrect_color), 0.5);
 	cairo_stroke (cr);
 
 	/* Playhead */
@@ -313,6 +320,10 @@ void
 EditorSummary::set_colors ()
 {
 	_phead_color = UIConfiguration::instance().color ("play head");
+	_background_color = UIConfiguration::instance().color ("summary: base");
+	_track_color = UIConfiguration::instance().color_mod ("summary: track base", "summary track alpha");
+	_marker_color = UIConfiguration::instance().color ("location session");
+	_viewrect_color = UIConfiguration::instance().color_mod ("summary: view rect", "summary view rect alpha");
 }
 
 
@@ -382,11 +393,31 @@ EditorSummary::set_overlays_dirty_rect (int x, int y, int w, int h)
 void
 EditorSummary::on_size_request (Gtk::Requisition *req)
 {
-	/* The left/right buttons will determine our height */
-	req->width = -1;
-	req->height = -1;
+       CairoWidget::on_size_request (req);
+       if (get_child ()) {
+			   Gtk::Requisition child_req = get_child()->size_request ();
+			   req->width = -1;
+			   // merge top border with editor toolbar's top border
+			   req->height = child_req.height -1;
+
+       } else {
+               req->width = -1;
+               req->height = -1;
+       }
 }
 
+/** Adjust width when the buttons hide a significant part of the surface
+ *  @param req GTK requisition
+ */
+int
+EditorSummary::get_variable_width ()
+{
+	if (get_height() > _toolbar_height * 3 / 2) {
+		return get_width();
+	} else {
+		return get_width() - (_toolbar_width - 1);
+	}
+}
 
 void
 EditorSummary::centre_on_click (GdkEventButton* ev)
@@ -398,8 +429,8 @@ EditorSummary::centre_on_click (GdkEventButton* ev)
 	double ex = ev->x - w / 2;
 	if (ex < 0) {
 		ex = 0;
-	} else if ((ex + w) > get_width()) {
-		ex = get_width() - w;
+	} else if ((ex + w) > get_variable_width()) {
+		ex = get_variable_width() - w;
 	}
 
 	set_editor (ex);
@@ -498,7 +529,6 @@ EditorSummary::on_button_press_event (GdkEventButton* ev)
 
 		_zoom_trim_position = get_position (ev->x, ev->y);
 		_zoom_trim_dragging = true;
-		_editor._dragging_playhead = true;
 		_editor.set_follow_playhead (false);
 
 		if (suspending_editor_updates ()) {
@@ -522,7 +552,6 @@ EditorSummary::on_button_press_event (GdkEventButton* ev)
 		/* start a move+zoom drag */
 		get_editor (&_pending_editor_x, &_pending_editor_y);
 		_pending_editor_changed = false;
-		_editor._dragging_playhead = true;
 		_editor.set_follow_playhead (false);
 
 		_move_dragging = true;
@@ -593,7 +622,15 @@ EditorSummary::get_position (double x, double y) const
 	bool const near_right = (std::abs (x - _view_rectangle_x.second) < x_edge_size);
 	bool const within_x = _view_rectangle_x.first < x && x < _view_rectangle_x.second;
 
-	if (near_left) {
+	// we need mouse coordinates relative to the summary in order to define
+	// whether we're hovering the toolbar or not
+	gint x1, y1;
+	get_pointer(x1, y1);
+	bool const on_toolbar = x1 >= get_width() - _toolbar_width && y1 >= get_height() - _toolbar_height;
+
+	if (on_toolbar) {
+		return TOOLBAR;
+	} else if (near_left) {
 		return LEFT;
 	} else if (near_right) {
 		return RIGHT;
@@ -631,6 +668,9 @@ EditorSummary::set_cursor (SummaryPosition p)
 		break;
 	case TO_LEFT_OR_RIGHT:
 		get_window()->set_cursor (*_editor._cursors->move);
+		break;
+	case TOOLBAR:
+		get_window()->set_cursor ();
 		break;
 	default:
 		assert (0);
@@ -709,7 +749,7 @@ EditorSummary::on_motion_notify_event (GdkEventMotion* ev)
 			pair<double, double> xr;
 			get_editor (&xr);
 			double w = xr.second - xr.first;
-			if (x + w < get_width()) {
+			if (x + w < get_variable_width()) {
 				set_editor (x);
 			}
 		}
@@ -727,10 +767,14 @@ EditorSummary::on_motion_notify_event (GdkEventMotion* ev)
 
 		if (_zoom_trim_position == LEFT) {
 			xr.first += dx;
+			/* prevent from moving once we've reached the right edge of the view rect */
+			if (xr.first > xr.second) {
+				xr.first = xr.second;
+			}
 		} else if (_zoom_trim_position == RIGHT) {
 
 			/* zoom-behavior-tweaks: protect the right edge from expanding beyond the edge */
-			if ((xr.second + dx) < get_width()) {
+			if ((xr.second + dx) < get_variable_width()) {
 				xr.second += dx;
 			}
 
@@ -751,18 +795,19 @@ EditorSummary::on_motion_notify_event (GdkEventMotion* ev)
 }
 
 bool
-EditorSummary::on_button_release_event (GdkEventButton*)
+EditorSummary::on_button_release_event (GdkEventButton* ev)
 {
 	bool const was_suspended = suspending_editor_updates ();
 
 	_move_dragging = false;
 	_zoom_trim_dragging = false;
-	_editor._dragging_playhead = false;
 	_editor.set_follow_playhead (_old_follow_playhead, false);
 
 	if (was_suspended && _pending_editor_changed) {
 		set_editor (_pending_editor_x);
 	}
+
+	set_cursor (get_position (ev->x, ev->y));
 
 	return true;
 }
@@ -817,7 +862,7 @@ EditorSummary::on_scroll_event (GdkEventScroll* ev)
 			} else if (Keyboard::modifier_state_contains (ev->state, Keyboard::TertiaryModifier) && !user_needs_to_buy_a_proper_mouse) {
 				x -= 1;
 			} else {
-				_editor.scroll_left_half_page ();
+				_editor.scroll_left_step ();
 				return true;
 			}
 			break;
@@ -829,7 +874,7 @@ EditorSummary::on_scroll_event (GdkEventScroll* ev)
 			} else if (Keyboard::modifier_state_contains (ev->state, Keyboard::TertiaryModifier) && !user_needs_to_buy_a_proper_mouse) {
 				x += 1;
 			} else {
-				_editor.scroll_right_half_page ();
+				_editor.scroll_right_step ();
 				return true;
 			}
 			break;
@@ -1001,7 +1046,7 @@ EditorSummary::route_gui_changed (PBD::PropertyChange const& what_changed)
 double
 EditorSummary::playhead_sample_to_position (samplepos_t t) const
 {
-	return (t - _start) * _x_scale;
+	return 0.5 + round((t - _start) * _x_scale);
 }
 
 samplepos_t

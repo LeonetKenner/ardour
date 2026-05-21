@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 1999-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2026 Paul Davis <paul@linuxaudiosystems.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,59 +18,32 @@
 
 #pragma once
 
-#include <vector>
-
 #include "ardour/libardour_visibility.h"
 
-class LIBARDOUR_API MusicalMode
-{
-  public:
-	enum Type {
-		Dorian,
-		IonianMajor,
-		AeolianMinor,
-		HarmonicMinor,
-		MelodicMinorAscending,
-		MelodicMinorDescending,
-		Phrygian,
-		Lydian,
-		Mixolydian,
-		Locrian,
-		PentatonicMajor,
-		PentatonicMinor,
-		Chromatic,
-		BluesScale,
-		NeapolitanMinor,
-		NeapolitanMajor,
-		Oriental,
-		DoubleHarmonic,
-		Enigmatic,
-		Hirajoshi,
-		HungarianMinor,
-		HungarianMajor,
-		Kumoi,
-		Iwato,
-		Hindu,
-		Spanish8Tone,
-		Pelog,
-		HungarianGypsy,
-		Overtone,
-		LeadingWholeTone,
-		Arabian,
-		Balinese,
-		Gypsy,
-		Mohammedan,
-		Javanese,
-		Persian,
-		Algerian
-	};
+namespace Temporal {
+	class timepos_t;
+}
 
-	MusicalMode (Type t);
-	~MusicalMode ();
+namespace ARDOUR {
 
-	std::vector<float> steps;
+class MusicalKey;
+
+class LIBARDOUR_API ScaleProvider {
+   public:
+	ScaleProvider (ScaleProvider* parent);
+	virtual ~ScaleProvider ();
+
+	ScaleProvider* parent() const  { return _parent; }
+	virtual MusicalKey const * key() const;
+	virtual MusicalKey const * key_at (Temporal::timepos_t const &) const {
+		/* by default, ignore time since there's only 1 answer */
+		return key();
+	}
+	void set_key (MusicalKey const &);
 
   private:
-	static void fill (MusicalMode&, Type);
+	ScaleProvider* _parent;
+	MusicalKey const * _key;
 };
 
+} // namespace 

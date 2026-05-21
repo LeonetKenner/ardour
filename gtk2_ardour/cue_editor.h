@@ -67,8 +67,6 @@ class CueEditor : public EditingContext, public PBD::HistoryOwner
 	Temporal::timecnt_t get_nudge_distance (Temporal::timepos_t const & pos, Temporal::timecnt_t& next) const;
 	std::list<SelectableOwner*> selectable_owners() { return std::list<SelectableOwner*>(); }
 
-	void instant_save();
-
 	void begin_selection_op_history ();
 	void begin_reversible_selection_op (std::string cmd_name);
 	void commit_reversible_selection_op ();
@@ -125,9 +123,13 @@ class CueEditor : public EditingContext, public PBD::HistoryOwner
 	bool ruler_event (GdkEvent*);
 
 	virtual void set_show_source (bool);
+	virtual void add_region (std::shared_ptr<ARDOUR::Region>, std::shared_ptr<ARDOUR::Track>) {}
+	virtual void remove_regions() {}
 	virtual void set_region (std::shared_ptr<ARDOUR::Region>);
 	virtual void set_track (std::shared_ptr<ARDOUR::Track>);
 	virtual void set_trigger (ARDOUR::TriggerReference&);
+
+	virtual void set_inspector_visibility (bool) {}
 
 	virtual void maybe_update () = 0;
 
@@ -142,6 +144,8 @@ class CueEditor : public EditingContext, public PBD::HistoryOwner
 	virtual void shift_contents (Temporal::timepos_t const &, bool model_too) {}
 	virtual Temporal::timepos_t source_to_timeline (Temporal::timepos_t const & source_pos) const { return source_pos; }
 
+	void set_horizontal_position (double);
+
   protected:
 	ArdourCanvas::GtkCanvasViewport _canvas_viewport;
 	ArdourCanvas::GtkCanvas& _canvas;
@@ -151,6 +155,7 @@ class CueEditor : public EditingContext, public PBD::HistoryOwner
 	bool with_transport_controls;
 	bool show_source;
 	ArdourWidgets::EventBoxExt _contents;
+	Gtk::HBox                  _hpacker;
 	Gtk::VBox                  _toolbox;
 	Gtk::HBox                   button_bar;
 	Gtk::HScrollbar*           _canvas_hscrollbar;
@@ -265,8 +270,7 @@ class CueEditor : public EditingContext, public PBD::HistoryOwner
 	virtual void unset_region ();
 	virtual void unset_trigger ();
 
-	RegionUISettings region_ui_settings;
-	void maybe_set_from_rsu ();
+	bool maybe_set_from_rsu (PBD::ID const &);
 	virtual void set_from_rsu (RegionUISettings&);
 
 	void metric_get_bbt (std::vector<ArdourCanvas::Ruler::Mark>&, samplepos_t, samplepos_t, gint);
@@ -277,4 +281,7 @@ class CueEditor : public EditingContext, public PBD::HistoryOwner
 
 	virtual void region_prop_change (PBD::PropertyChange const & what_changed) {}
 	virtual void trigger_prop_change (PBD::PropertyChange const & what_changed) {}
+
+	void initialize_region_ui_settings (RegionUISettings&);
+	void add_region_ui_settings (PBD::ID const &, RegionUISettings&);
 };

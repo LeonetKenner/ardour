@@ -453,6 +453,7 @@ OSC::register_callbacks()
 		REGISTER_CALLBACK (serv, X_("/transport_frame"), "", transport_sample);
 		REGISTER_CALLBACK (serv, X_("/transport_speed"), "", transport_speed);
 		REGISTER_CALLBACK (serv, X_("/record_enabled"), "", record_enabled);
+		REGISTER_CALLBACK (serv, X_("/is_recording"), "", is_recording);
 		REGISTER_CALLBACK (serv, X_("/set_transport_speed"), "f", set_transport_speed);
 		// locate ii is position and bool roll
 		REGISTER_CALLBACK (serv, X_("/locate"), "ii", locate);
@@ -488,7 +489,9 @@ OSC::register_callbacks()
 		REGISTER_CALLBACK (serv, X_("/rec_enable_toggle"), "f", rec_enable_toggle);
 		REGISTER_CALLBACK (serv, X_("/toggle_all_rec_enables"), "", toggle_all_rec_enables);
 		REGISTER_CALLBACK (serv, X_("/toggle_all_rec_enables"), "f", toggle_all_rec_enables);
+		REGISTER_CALLBACK (serv, X_("/all_tracks_rec_in"), "", all_tracks_rec_in);
 		REGISTER_CALLBACK (serv, X_("/all_tracks_rec_in"), "f", all_tracks_rec_in);
+		REGISTER_CALLBACK (serv, X_("/all_tracks_rec_out"), "", all_tracks_rec_out);
 		REGISTER_CALLBACK (serv, X_("/all_tracks_rec_out"), "f", all_tracks_rec_out);
 		REGISTER_CALLBACK (serv, X_("/cancel_all_solos"), "f", cancel_all_solos);
 		REGISTER_CALLBACK (serv, X_("/remove_marker"), "", remove_marker_at_playhead);
@@ -876,7 +879,9 @@ OSC::catchall (const char *path, const char* types, lo_arg **argv, int argc, lo_
 	} else if (strstr (path, X_("/select"))) {
 		ret = select_parse (path, types, argv, argc, msg);
 	} else if (strstr (path, X_("/goto_marker"))) {
-		ret = goto_marker (types, argv, argc, msg);
+		ret = goto_marker (types, argv, argc, msg, MustStop);
+	} else if (strstr (path, X_("/locate_to_marker"))) {
+		ret = goto_marker (types, argv, argc, msg, RollIfAppropriate);
 	} else if (strstr (path, X_("/link"))) {
 		ret = parse_link (path, types, argv, argc, msg);
 	}
@@ -3001,6 +3006,27 @@ OSC::record_enabled (lo_message msg)
 	lo_message_free (reply);
 }
 
+void
+OSC::is_recording (lo_message msg)
+{
+	if (!session) {
+		return;
+	}
+
+	check_surface (msg);
+
+	RecordState const r = session->record_status ();
+	bool const h = session->have_rec_enabled_track ();
+	int re = (int)(r == Recording && h);
+
+	lo_message reply = lo_message_new ();
+	lo_message_add_int32 (reply, re);
+
+	lo_send_message (get_address (msg), X_("/is_recording"), reply);
+
+	lo_message_free (reply);
+}
+
 int
 OSC::scrub (float delta, lo_message msg)
 {
@@ -3183,7 +3209,7 @@ OSC::mixer_scene_state (lo_address addr, bool zero_it)
 }
 
 int
-OSC::goto_marker (const char* types, lo_arg **argv, int argc, lo_message msg)
+OSC::goto_marker (const char* types, lo_arg **argv, int argc, lo_message msg, LocateTransportDisposition ltd)
 {
 	if (argc != 1) {
 		PBD::warning << "Wrong number of parameters, one only." << endmsg;
@@ -3201,7 +3227,7 @@ OSC::goto_marker (const char* types, lo_arg **argv, int argc, lo_message msg)
 						for (const auto& l : ll) {
 							if (l->is_mark ()) {
 								if (strcmp (&argv[0]->s, l->name().c_str()) == 0) {
-									session->request_locate (l->start_sample (), false, MustStop);
+									session->request_locate (l->start_sample (), false, ltd);
 									return 0;
 								}
 							}
@@ -3211,7 +3237,7 @@ OSC::goto_marker (const char* types, lo_arg **argv, int argc, lo_message msg)
 						for (auto l = ll.rbegin(); l != ll.rend(); ++l) {
 							if ((*l)->is_mark ()) {
 								if (strcmp (&argv[0]->s, (*l)->name().c_str()) == 0) {
-									session->request_locate ((*l)->start_sample (), false, MustStop);
+									session->request_locate ((*l)->start_sample (), false, ltd);
 									return 0;
 								}
 							}
@@ -3223,7 +3249,7 @@ OSC::goto_marker (const char* types, lo_arg **argv, int argc, lo_message msg)
 							if (l->is_mark ()) {
 								if (strcmp (&argv[0]->s, l->name().c_str()) == 0) {
 									if (l->start_sample() > session->transport_sample()) {
-										session->request_locate (l->start_sample (), false, MustStop);
+										session->request_locate (l->start_sample (), false, ltd);
 										return 0;
 									}
 
@@ -3234,7 +3260,7 @@ OSC::goto_marker (const char* types, lo_arg **argv, int argc, lo_message msg)
 							}
 						}
 						if (first) {
-							session->request_locate (first->start_sample (), false, MustStop);
+							session->request_locate (first->start_sample (), false, ltd);
 							return 0;
 						}
 						break;
@@ -3266,7 +3292,7 @@ OSC::goto_marker (const char* types, lo_arg **argv, int argc, lo_message msg)
 	std::sort (lm.begin(), lm.end(), location_marker_sort);
 	// go there
 	if (marker < lm.size()) {
-		session->request_locate (lm[marker].when, false, MustStop);
+		session->request_locate (lm[marker].when, false, ltd);
 		return 0;
 	}
 	// we were unable to deal with things

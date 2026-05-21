@@ -18,7 +18,7 @@ test -f gtk2_ardour/wscript || exit 1
 : ${SRCCACHE=/var/tmp/winsrc}  # source-code tgz cache
 : ${CURLOPT="-s -S --retry-connrefused --retry 3"}
 
-: ${HARRISONCHANNELSTRIP=harrison_channelstrip}
+: ${HARRISONCHANNELSTRIP=harrison_channelstrip${major_version}}
 : ${HARRISONLV2=harrison_lv2s-n}
 : ${HARRISONDSPURL=https://builder.harrisonconsoles.com/pub/dsp}
 
@@ -232,8 +232,17 @@ else
 	cp /usr/lib/gcc/${XPREFIX}/*/libgcc_s_sjlj-1.dll $DESTDIR/bin/
 	cp /usr/lib/gcc/${XPREFIX}/*/libstdc++-6.dll $DESTDIR/bin/
 fi
-#Ubuntu's 14.04's mingw needs this one for the std libs above
-if test -f /usr/${XPREFIX}/lib/libwinpthread-1.dll; then
+
+if test -n "$PACKAGE_GDB"; then
+	# https://gist.github.com/x42/469f412b51294d5123be82f34906ba3f
+	# applied to mingw-w64-12.0.0 to work around thread_local use after free
+	# https://github.com/msys2/MINGW-packages/issues/2519
+	download libwinpthread-1.dll http://ardour.org/files/deps/libwinpthread-1.dll
+fi
+
+if test -n "$PACKAGE_GDB" -a -f ${SRCCACHE}/libwinpthread-1.dll; then
+	cp ${SRCCACHE}/libwinpthread-1.dll $DESTDIR/bin/
+elif test -f /usr/${XPREFIX}/lib/libwinpthread-1.dll; then
 	cp /usr/${XPREFIX}/lib/libwinpthread-1.dll $DESTDIR/bin/
 fi
 
@@ -456,16 +465,6 @@ elif test -z "$LIVETRAX" -a -z "$VBM"; then
 		rm -f $DESTDIR/share/${LOWERCASE_DIRNAME}/media/*.*
 		unzip -q -o -d "$DESTDIR/share/${LOWERCASE_DIRNAME}/media/" "${SRCCACHE}/ArdourBundledMedia.zip"
 	fi
-fi
-
-################################################################################
-
-if test x$DEMO_SESSION_URL != x ; then
-	mkdir -p $DESTDIR/share/${LOWERCASE_DIRNAME}/sessions
-	DEMO_SESSIONS=$(curl ${CURLOPT} --fail $DEMO_SESSION_URL/index.txt)
-	for demo in $DEMO_SESSIONS; do
-		curl ${CURLOPT} --fail -# -o $DESTDIR/share/${LOWERCASE_DIRNAME}/sessions/$demo $DEMO_SESSION_URL/$demo
-	done
 fi
 
 ################################################################################

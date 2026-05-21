@@ -91,7 +91,10 @@ class DeviceInfo
 	bool has_meters() const;
 	bool has_separate_meters() const;
 	bool single_fader_follows_selection() const;
+	bool follows_selection() const;
 	const std::string& name() const;
+
+	void set_follows_selection (bool);
 
 	static std::map<std::string,DeviceInfo> device_info;
 	static void reload_device_info();
@@ -130,6 +133,7 @@ class DeviceInfo
 	bool     _has_meters;
 	bool     _has_separate_meters;
 	bool     _single_fader_follows_selection;
+	bool     _follows_selection;
 	DeviceType _device_type;
 	std::string _name;
 	std::string _global_button_name;

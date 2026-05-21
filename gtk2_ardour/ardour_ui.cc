@@ -352,6 +352,9 @@ ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 {
 	Gtkmm2ext::init (localedir);
 
+	Splash::instance()->exists(); // create splash
+	flush_pending ();
+
 	UIConfiguration::instance().post_gui_init ();
 
 	if (ARDOUR::handle_old_configuration_files (std::bind (ask_about_configuration_copy, _1, _2, _3))) {
@@ -359,11 +362,6 @@ ARDOUR_UI::ARDOUR_UI (int *argcp, char **argvp[], const char* localedir)
 		{
 			/* "touch" the been-here-before path now that config has been migrated */
 			PBD::ScopedFileDescriptor fout (g_open (been_here_before_path ().c_str(), O_CREAT|O_TRUNC|O_RDWR, 0666));
-		}
-
-		{
-			Config->load_state (); // need session-parent folder
-			copy_demo_sessions ();
 		}
 
 		ArdourMessageDialog msg (string_compose (_("Your configuration files were copied. You can now restart %1."), PROGRAM_NAME), true);
@@ -3021,12 +3019,11 @@ ARDOUR_UI::pending_state_dialog ()
 	ArdourDialog dialog (_("Crash Recovery"), true);
 	Label  message (string_compose (_("\
 This session appears to have been modified\n\
-without save, or in middle of recording when\n\
-%1 or the computer was shutdown.\n\
+without being saved or in the middle of recording\n\
+when %1 or the computer was shutdown.\n\
 \n\
 %1 can recover any changes for\n\
-you, or it can ignore it. Please decide\n\
-what you would like to do.\n"), PROGRAM_NAME));
+you or it can ignore them.\n"), PROGRAM_NAME));
 	image->set_alignment(ALIGN_CENTER, ALIGN_START);
 	hbox->pack_start (*image, PACK_EXPAND_WIDGET, 12);
 	hbox->pack_end (message, PACK_EXPAND_PADDING, 12);

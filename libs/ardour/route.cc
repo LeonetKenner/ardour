@@ -119,6 +119,7 @@ Route::Route (Session& sess, string name, PresentationInfo::Flag flag, DataType 
 	: Stripable (sess, name, PresentationInfo (flag))
 	, GraphNode (sess._process_graph)
 	, Muteable (sess, name)
+	, ScaleProvider (&sess)
 	, _active (true)
 	, _signal_latency (0)
 	, _output_latency (0)
@@ -6669,4 +6670,16 @@ Route::remove_surround_send ()
 	 * This can lead to deadlock in ARDOUR::Session::route_processors_changed
 	 */
 	_pending_surround_send.store (1);
+}
+
+uint32_t
+Route::color() const
+{
+	std::shared_ptr<RouteGroup> g = route_group ();
+
+	if (g && g->is_color()) {
+		return g->rgba ();
+	}
+
+	return presentation_info().color();
 }

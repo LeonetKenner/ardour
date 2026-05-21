@@ -114,6 +114,9 @@ public:
 
 	void set_visibility_note_range (MidiStreamView::VisibleNoteRange range, bool apply_to_selection = false);
 
+	void entered ();
+	void exited ();
+
 protected:
 	void start_step_editing ();
 	void stop_step_editing ();
@@ -154,9 +157,6 @@ private:
 	PianoRollHeader*              _piano_roll_header;
 	Gtk::RadioMenuItem*           _note_mode_item;
 	Gtk::RadioMenuItem*           _percussion_mode_item;
-	Gtk::RadioMenuItem*           _meter_color_mode_item;
-	Gtk::RadioMenuItem*           _channel_color_mode_item;
-	Gtk::RadioMenuItem*           _track_color_mode_item;
 	Gtk::VBox                     _midi_controls_box;
 	MidiChannelSelectorWindow*    _channel_selector;
 

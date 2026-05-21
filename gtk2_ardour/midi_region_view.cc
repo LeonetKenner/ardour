@@ -109,7 +109,7 @@ MidiRegionView::MidiRegionView (ArdourCanvas::Container*      parent,
                                 double                        spu,
                                 uint32_t                      basic_color)
 	: RegionView (parent, tv, r, spu, basic_color)
-	, MidiView (std::dynamic_pointer_cast<MidiTrack> (tv.stripable()), *group, ec, *dynamic_cast<MidiStreamView*>(tv.view()), basic_color)
+	, MidiView (std::dynamic_pointer_cast<MidiTrack> (tv.stripable()), *group, ec, *dynamic_cast<MidiStreamView*>(tv.view()))
 {
 	connect_to_diskstream ();
 }
@@ -123,7 +123,7 @@ MidiRegionView::MidiRegionView (ArdourCanvas::Container*      parent,
                                 bool                          recording,
                                 TimeAxisViewItem::Visibility  visibility)
 	: RegionView (parent, tv, r, spu, basic_color, recording, visibility)
-	, MidiView (std::dynamic_pointer_cast<MidiTrack> (tv.stripable()), *group, ec, *dynamic_cast<MidiStreamView*>(tv.view()), basic_color)
+	, MidiView (std::dynamic_pointer_cast<MidiTrack> (tv.stripable()), *group, ec, *dynamic_cast<MidiStreamView*>(tv.view()))
 {
 	connect_to_diskstream ();
 }
@@ -201,7 +201,7 @@ MidiRegionView::parameter_changed (std::string const & p)
 		}
 	} else if (p == "color-regions-using-track-color") {
 		set_colors ();
-	} else if (p == "use-note-color-for-velocity") {
+	} else if (p == "default-midi-note-color-mode") {
 		color_handler ();
 	}
 }
@@ -313,14 +313,16 @@ MidiRegionView::canvas_group_event(GdkEvent* ev)
 
 		switch (ev->type) {
 		case GDK_ENTER_NOTIFY:
+			break;
 		case GDK_LEAVE_NOTIFY:
+			leave_notify (&ev->crossing);
 			break;
 		default:
 			return true;
 		}
 	}
 
-	return _editing_context.canvas_bg_event (ev, get_canvas_group());
+	return dynamic_cast<PublicEditor*> (&_editing_context)->canvas_region_view_event (ev, get_canvas_group(), this);
 }
 
 bool
@@ -409,10 +411,9 @@ MidiRegionView::scroll (GdkEventScroll* ev)
 		return false;
 	}
 
-	if (Keyboard::modifier_state_equals (ev->state, Keyboard::PrimaryModifier)) {
-		/* XXX: bit of a hack; allow PrimaryModifier scroll
-		 * through so that it still works for navigation and zoom.
-		 */
+	if (Keyboard::modifier_state_equals (ev->state, Keyboard::PrimaryModifier) ||
+	    Keyboard::modifier_state_equals (ev->state, Keyboard::ScrollHorizontalModifier)) {
+		/* Let primary-modifier and shift-only scroll propagate to editor-level handlers. */
 		return false;
 	}
 
@@ -637,69 +638,6 @@ MergeableLine*
 MidiRegionView::make_merger ()
 {
 	return nullptr;
-}
-
-void
-MidiRegionView::add_control_points_to_selection (timepos_t const & start, timepos_t const & end, double gy0, double gy1)
-{
-	typedef RouteTimeAxisView::AutomationTracks ATracks;
-	typedef std::list<Selectable*>              Selectables;
-
-	const ATracks& atracks = dynamic_cast<StripableTimeAxisView*>(&trackview)->automation_tracks();
-	Selectables    selectables;
-	_editing_context.get_selection().clear_points();
-
-	timepos_t st (start);
-	timepos_t et (end);
-
-	for (auto const & at : atracks) {
-
-		at.second->get_selectables (st, et, gy0, gy1, selectables);
-
-		for (Selectables::const_iterator s = selectables.begin(); s != selectables.end(); ++s) {
-			ControlPoint* cp = dynamic_cast<ControlPoint*>(*s);
-			if (cp) {
-				_editing_context.get_selection().add(cp);
-			}
-		}
-
-		at.second->set_selected_points (_editing_context.get_selection().points);
-	}
-}
-
-bool
-MidiRegionView::pianoroll_window_deleted (GdkEventAny*)
-{
-	_editor = nullptr;
-	return false;
-}
-
-void
-MidiRegionView::show_region_editor ()
-{
-	if (!_editor) {
-		std::shared_ptr<MidiTrack> track = std::dynamic_pointer_cast<MidiTrack> (trackview.stripable());
-		assert (track);
-
-		PianorollWindow* pr = new PianorollWindow (string_compose (_("Pianoroll: %1"), _region->name()), track->session());
-
-		pr->set (track, midi_region());
-		pr->set_show_source (false);
-
-		pr->signal_delete_event().connect (sigc::mem_fun (*this, &MidiRegionView::pianoroll_window_deleted), false);
-		_editor = pr;
-	}
-
-	_editor->show_all ();
-	_editor->present ();
-}
-
-void
-MidiRegionView::hide_region_editor ()
-{
-	RegionView::hide_region_editor ();
-	delete _editor;
-	_editor = nullptr;
 }
 
 void

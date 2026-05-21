@@ -61,12 +61,17 @@ gtk2_ardour_sources = [
         'big_transport_window.cc',
         'boundary.cc',
         'bundle_manager.cc',
+        'canvas_icon.cc',
+        'chord_box.cc',
+        'chord_dialog.cc',
+        'chord_editor.cc',
         'clock_group.cc',
         'color_theme_manager.cc',
         'configinfo.cc',
         'control_point.cc',
         'control_point_dialog.cc',
         'control_slave_ui.cc',
+        'cross_cursor.cc',
         'cuebox_ui.cc',
         'cue_editor.cc',
         'curvetest.cc',
@@ -164,6 +169,7 @@ gtk2_ardour_sources = [
         'midi_channel_selector.cc',
         'midi_cut_buffer.cc',
         'midi_export_dialog.cc',
+        'midi_inspector.cc',
         'midi_list_editor.cc',
         'midi_region_view.cc',
         'midi_trigger_properties_box.cc',
@@ -217,6 +223,7 @@ gtk2_ardour_sources = [
         'pianoroll_midi_view.cc',
         'pianoroll_window.cc',
         'pingback.cc',
+        'pitch_color_dialog.cc',
         'playlist_selector.cc',
         'plugin_display.cc',
         'plugin_eq_gui.cc',
@@ -290,6 +297,7 @@ gtk2_ardour_sources = [
         'session_dialog.cc',
         'session_metadata_dialog.cc',
         'session_option_editor.cc',
+        'scale_dialog.cc',
         'sfdb_ui.cc',
         'shuttle_control.cc',
         'simple_export_dialog.cc',
@@ -470,8 +478,20 @@ def enoify (major, minor):
             return "\\n\\\"Music for Onmyo-Ji\\\"" # 2000 Collaborative
         if minor == 2:
             return "\\n\\\"Compact Forest Proposal\\\"" # 2001
-        if minor == 3:
+        if minor >= 3 and minor <= 5:
             return "\\n\\\"Drawn from Life\\\"" # 2001 Collaborative
+        if minor == 6:
+            return "\\n\\\"Bell Studies for the Clock of the Long Now\\\"" # 2003
+        if minor == 7:
+            return "\\n\\\"The Equatorial Stars\\\"" # 2004 Collaborative
+        if minor == 8:
+            return "\\n\\\"Another Day on Earth\\\"" # 2005
+        if minor == 9:
+            return "\\n\\\"77 Million Paintings\\\"" # 2006
+        if minor == 10:
+            return "\\n\\\"Beyond Even\\\"" # 2007 Collaborative
+        if minor == 11:
+            return "\\n\\\"Making Space \\\"" # 2010
     return "\\\"\\\""
 
 def options(opt):
@@ -561,7 +581,7 @@ def build(bld):
         obj.source += [ 'luadoc.cc', 'bundle_env_linux.cc' ]
         obj.use    += [ 'X11' ]
         obj.use    += [ 'libytk', 'libytkmm' ]
-        obj.uselib += ' GLIBMM GIOMM PANGOMM PANGOFT2 LIBPNG'
+        obj.uselib += ' GLIBMM GIOMM PANGOMM PANGOFT2 LIBPNG LIBJPEG'
 
         if False and bld.is_defined('USE_EXTERNAL_LIBS'):
             obj.uselib += ' LIBAAF'
@@ -656,13 +676,14 @@ def build(bld):
         ]
     obj.install_path = bld.env['DLLDIR']
     obj.linkflags    = [ bld.env['compiler_flags_dict']['execstack'] ]
-    obj.uselib       = 'UUID FLAC FONTCONFIG GTHREAD OGG PANGOMM CURL DL CANVAS FFTW3F LO TAGLIB XML LILV RUBBERBAND AUBIO LRDF ARCHIVE VAMPSDK VAMPHOSTSDK GLIBMM GIOMM PANGOFT2 LIBPNG'
+    obj.uselib       = 'UUID FLAC FONTCONFIG GTHREAD OGG PANGOMM CURL DL CANVAS FFTW3F LO TAGLIB XML LILV RUBBERBAND AUBIO LRDF ARCHIVE VAMPSDK VAMPHOSTSDK GLIBMM GIOMM PANGOFT2 LIBPNG LIBJPEG'
 
     if bld.env['build_target'] == 'msvc':
         obj.env['LIB_LO'] = ['liblo']
         obj.use += ['liblua']
         obj.uselib += ' PANGOCAIRO GDI32'
         obj.lib = ['getopt']
+        obj.defines += ['NOMINMAX']
 
     if False and bld.is_defined('USE_EXTERNAL_LIBS'):
         obj.uselib += ' LIBAAF'
@@ -675,8 +696,11 @@ def build(bld):
         obj.uselib += ' AUDIOUNITS OSX '
         obj.use    += ' libappleutility'
         obj.source += [ 'cocoacarbon.mm', 'bundle_env_cocoa.cc' ]
-    elif bld.env['build_target'] == 'mingw' or bld.env['build_target'] == 'msvc':
+    elif bld.env['build_target'] == 'mingw':
         obj.source += [ 'bundle_env_mingw.cc' ]
+        obj.source += [ 'windows_icon.rc' ]
+    elif bld.env['build_target'] == 'msvc':
+        obj.source += [ 'bundle_env_msvc2.cc' ]
         obj.source += [ 'windows_icon.rc' ]
     else:
         obj.source += [ 'bundle_env_linux.cc' ]
@@ -745,7 +769,7 @@ def build(bld):
             'EXECUTABLE'     : 'build/gtk2_ardour/ardour-' + bld.env['VERSION']
     }
 
-    if bld.env['build_target'] == 'mingw' and sys.platform == "win32":
+    if bld.env['build_target'] in ('mingw', 'msvc') and sys.platform == "win32":
         wrapper_subst_dict.update({
             'LD_LIBRARY_PATH': 'PATH'
         })
@@ -888,7 +912,7 @@ def build(bld):
 
     obj = bld(features = 'command-output')
     if bld.env['build_target'] == 'msvc':
-        obj.command = 'cl'
+        obj.command = bld.env['CXX'][0]
     else:
         obj.command = 'cpp'
     obj.command_is_external = True

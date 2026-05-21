@@ -23,6 +23,11 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#if defined COMPILER_MSVC && defined WAF_BUILD
+#define NOMINMAX
+#define _WINSOCKAPI_
+#endif
+
 #include "pbd/memento_command.h"
 
 #include "temporal/tempo.h"
@@ -514,11 +519,7 @@ BasicUI::redo ()
 void
 BasicUI::toggle_all_rec_enables ()
 {
-	if (session->get_record_enabled()) {
-		// session->record_disenable_all ();
-	} else {
-		// session->record_enable_all ();
-	}
+	session->toggle_all_tracks_record_enabled ();
 }
 
 void

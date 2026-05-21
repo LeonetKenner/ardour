@@ -19,7 +19,7 @@ export GTK2_RC_FILES=/nonexistent
 # can find all the components.
 #
 
-export ARDOUR_SURFACES_PATH=$libs/surfaces/osc:$libs/surfaces/faderport8:$libs/surfaces/faderport:$libs/surfaces/generic_midi:$libs/surfaces/tranzport:$libs/surfaces/powermate:$libs/surfaces/mackie:$libs/surfaces/us2400:$libs/surfaces/wiimote:$libs/surfaces/push2:$libs/surfaces/maschine2:$libs/surfaces/cc121:$libs/surfaces/launch_control_xl:$libs/surfaces/contourdesign:$libs/surfaces/websockets:$libs/surfaces/console1:$libs/surfaces/launchpad_pro:$libs/surfaces/launchpad_x:$libs/surfaces/launchkey_4
+export ARDOUR_SURFACES_PATH=$libs/surfaces/osc:$libs/surfaces/faderport8:$libs/surfaces/faderport:$libs/surfaces/generic_midi:$libs/surfaces/tranzport:$libs/surfaces/powermate:$libs/surfaces/mackie:$libs/surfaces/us2400:$libs/surfaces/wiimote:$libs/surfaces/push2:$libs/surfaces/maschine2:$libs/surfaces/cc121:$libs/surfaces/launch_control_xl:$libs/surfaces/contourdesign:$libs/surfaces/websockets:$libs/surfaces/mcp_http:$libs/surfaces/console1:$libs/surfaces/launchpad_pro:$libs/surfaces/launchpad_x:$libs/surfaces/launchkey_4
 export ARDOUR_PANNER_PATH=$libs/panners
 export ARDOUR_DATA_PATH=$TOP/share:$TOP/build:$TOP/gtk2_ardour:$TOP/build/gtk2_ardour
 export ARDOUR_MIDIMAPS_PATH=$TOP/share/midi_maps
@@ -50,7 +50,7 @@ export VAMP_PATH=$libs/vamp-plugins:$libs/vamp-pyin${VAMP_PATH:+:$VAMP_PATH}
 export @LD_LIBRARY_PATH@=$libs/tk/ydk-pixbuf:$libs/tk/ztk::$libs/tk/ydk:$libs/tk/ytk:$libs/tk/ztkmm:$libs/tk/ydkmm:$libs/tk/ytkmm:$libs/tk/suil:$libs/ptformat:$libs/qm-dsp:$libs/vamp-sdk:$libs/surfaces:$libs/ctrl-interface/control_protocol:$libs/ctrl-interface/midi_surface:$libs/ardour:$libs/midi++2:$libs/pbd:$libs/rubberband:$libs/soundtouch:$libs/aaf:$libs/gtkmm2ext:$libs/widgets:$libs/appleutility:$libs/taglib:$libs/evoral:$libs/evoral/src/libsmf:$libs/audiographer:$libs/temporal:$libs/libltc:$libs/canvas:$libs/waveview:$libs/ardouralsautil${@LD_LIBRARY_PATH@:+:$@LD_LIBRARY_PATH@}
 
 # DYLD_LIBRARY_PATH is for darwin.
-export DYLD_FALLBACK_LIBRARY_PATH=@LD_LIBRARY_PATH@
+export DYLD_FALLBACK_LIBRARY_PATH=$@LD_LIBRARY_PATH@
 
 # allow Ardour to run when configured with --address-sanitizer
 # - halt_on_error=0 - why would we?

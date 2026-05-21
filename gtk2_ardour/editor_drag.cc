@@ -34,6 +34,7 @@
 #include "pbd/basename.h"
 #include "pbd/memento_command.h"
 #include "pbd/stateful_diff_command.h"
+#include "pbd/unwind.h"
 
 #include <ytkmm/stock.h>
 
@@ -107,7 +108,6 @@ DragManager::DragManager (EditingContext* ec)
 	, _current_pointer_x (0.0)
 	, _current_pointer_y (0.0)
 	, _current_pointer_time (timepos_t::from_superclock (0)) /* avoid early use of superclock_ticks_per_second */
-	, _old_follow_playhead (false)
 {
 }
 
@@ -125,10 +125,6 @@ DragManager::abort ()
 	for (auto const & drag: _drags) {
 		drag->abort ();
 		delete drag;
-	}
-
-	if (!_drags.empty ()) {
-		_editing_context->set_follow_playhead (_old_follow_playhead, false);
 	}
 
 	_drags.clear ();
@@ -150,6 +146,17 @@ DragManager::set (Drag* d, GdkEvent* e, Gdk::Cursor* c)
 	d->set_manager (this);
 	_drags.push_back (d);
 	start_grab (e, c);
+}
+
+bool
+DragManager::dragging_lollipop () const
+{
+	for (auto const & drag: _drags) {
+		if (dynamic_cast<LollipopDrag*> (drag)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 bool
@@ -181,10 +188,6 @@ DragManager::mid_drag_key_event (GdkEventKey* ev)
 void
 DragManager::start_grab (GdkEvent* e, Gdk::Cursor* c)
 {
-	/* Prevent follow playhead during the drag to be nice to the user */
-	_old_follow_playhead = _editing_context->follow_playhead ();
-	_editing_context->set_follow_playhead (false);
-
 	_current_pointer_time = timepos_t (_editing_context->canvas_event_sample (e, &_current_pointer_x, &_current_pointer_y));
 
 	for (auto const & drag : _drags) {
@@ -222,10 +225,6 @@ DragManager::end_grab (GdkEvent* e)
 	}
 
 	_ending = false;
-
-	if (_drags.empty ()) {
-		_editing_context->set_follow_playhead (_old_follow_playhead, false);
-	}
 
 	return r;
 }
@@ -308,6 +307,12 @@ Drag::Drag (EditingContext& ec, ArdourCanvas::Item* i, Temporal::TimeDomain td, 
 Drag::~Drag ()
 {
 	DEBUG_TRACE (DEBUG::Drags, "drag destroyed\n");
+}
+
+void
+Drag::set_bounding_item (ArdourCanvas::Item const * i)
+{
+	_bounding_item = i;
 }
 
 Drag::MoveThreshold
@@ -708,13 +713,11 @@ RegionDrag::RegionDrag (Editor& e, ArdourCanvas::Item* i, RegionView* p, list<Re
 void
 RegionDrag::region_going_away (RegionView* v)
 {
-	list<DraggingView>::iterator i = _views.begin ();
-	while (i != _views.end () && i->view != v) {
-		++i;
-	}
-
-	if (i != _views.end ()) {
-		_views.erase (i);
+	for (auto i = _views.begin(); i != _views.end(); ++i) {
+		if (i->view == v) {
+			_views.erase (i);
+			return;
+		}
 	}
 }
 
@@ -5578,6 +5581,7 @@ SelectionDrag::motion (GdkEvent* event, bool first_move)
 
 	if (first_move) {
 		if (_editor.should_ripple_all ()) {
+			PBD::Unwinder<bool> uw (_editor._editor_track_selection_change_without_scroll, true);
 			editing_context.get_selection().set (_editor.get_track_views ());
 		}
 		_track_selection_at_start = editing_context.get_selection().tracks;
@@ -6749,11 +6753,15 @@ MidiRubberbandSelectDrag::MidiRubberbandSelectDrag (EditingContext& ec, MidiView
 }
 
 void
-MidiRubberbandSelectDrag::select_things (int button_state, timepos_t const& x1, timepos_t const& x2, double y1, double y2, bool /*drag_in_progress*/)
+MidiRubberbandSelectDrag::select_things (int button_state, timepos_t const& x1, timepos_t const& x2, double y1, double y2, bool drag_in_progress)
 {
-	_midi_view->update_drag_selection (
+	bool notes_selected = _midi_view->update_drag_selection (
 	    x1, x2, y1, y2,
-	    Keyboard::modifier_state_contains (button_state, Keyboard::TertiaryModifier));
+	    Keyboard::modifier_state_contains (button_state, Keyboard::TertiaryModifier), drag_in_progress);
+
+	if (!notes_selected) {
+		RubberbandSelectDrag::select_things (button_state, x1, x2, y1, y2, drag_in_progress);
+	}
 }
 
 void
@@ -7440,9 +7448,8 @@ FreehandLineDrag<OrderedPointList,OrderedPoint>::motion (GdkEvent* ev, bool firs
 		dragging_line->set_outline_color (UIConfiguration::instance().color ("automation line")); // XXX -> get color from EditorAutomationLine
 		dragging_line->raise_to_top ();
 
-		/* for freehand drawing, we only support left->right direction, for now. */
-		direction = 1;
-		edge_x = 0;
+		direction = 0;
+		edge_x = -1;
 		/* TODO:  allow the user to move "far" left, and then start drawing from the new leftmost position.
 		  ...start_grab() already occurred so this is non-trivial */
 
@@ -7459,12 +7466,6 @@ FreehandLineDrag<OrderedPointList,OrderedPoint>::maybe_add_point (GdkEvent* ev, 
 {
 	timepos_t pos (cpos);
 
-	/* Enforce left-to-right drawing */
-
-	if (direction <= 0) {
-		return;
-	}
-
 	editing_context.snap_to_with_modifier (pos, ev, Temporal::RoundNearest, ARDOUR::SnapToAny_Visual, true);
 
 	if (pos != _drags->current_pointer_time()) {
@@ -7476,6 +7477,8 @@ FreehandLineDrag<OrderedPointList,OrderedPoint>::maybe_add_point (GdkEvent* ev, 
 	 */
 
 	double const timeline_x = editing_context.time_to_pixel (pos);
+
+	if (edge_x == -1) edge_x = timeline_x;
 
 	ArdourCanvas::Rect r = base_rect.item_to_canvas (base_rect.get());
 
@@ -7492,12 +7495,6 @@ FreehandLineDrag<OrderedPointList,OrderedPoint>::maybe_add_point (GdkEvent* ev, 
 		line_start_y = y;
 	}
 
-	if (x < 0) {
-		dragging_line->clear ();
-		drawn_points.clear ();
-		edge_x = 0;
-		return;
-	}
 
 	/* Clamp y coordinate to the area of the base rect */
 
@@ -7507,6 +7504,23 @@ FreehandLineDrag<OrderedPointList,OrderedPoint>::maybe_add_point (GdkEvent* ev, 
 	bool pop_point = false;
 
 	const bool straight_line = Keyboard::modifier_state_equals (ev->motion.state, Keyboard::PrimaryModifier);
+
+	/* determine current drawing direction */
+
+	int current_direction = 0;
+	if (timeline_x != edge_x) {
+		current_direction = timeline_x > edge_x ? 1 : -1;
+	}
+
+	/* Make sure we can't change direction once it's been determined
+	 * Except for straight line mode that's bidirectionnal but only
+	 * if no other points have been drawn already.
+	 */
+	if (direction == 0) {
+		direction = current_direction;
+	} else if (current_direction != direction && !(straight_line && dragging_line->get().size() < 3)) {
+		return;
+	}
 
 	if (direction > 0) {
 		if (x < r.width() && (straight_line || (timeline_x > edge_x) || (timeline_x == edge_x && ev->motion.y != last_pointer_y()))) {
@@ -7571,7 +7585,7 @@ FreehandLineDrag<OrderedPointList,OrderedPoint>::maybe_add_point (GdkEvent* ev, 
 		}
 	}
 
-	if (add_point) {
+	if (add_point && !pop_point) {
 		edge_x = timeline_x;
 	}
 }

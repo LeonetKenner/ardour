@@ -33,13 +33,16 @@
 namespace Gtk {
 	class Widget;
 	class HScrollbar;
+	class ScrolledWindow;
 }
 
 namespace ArdourCanvas {
 	class Box;
+	class Button;
 	class Canvas;
 	class Container;
 	class GtkCanvasViewport;
+	class Icon;
 	class PianoRollHeader;
 	class ScrollGroup;
 	class Widget;
@@ -50,8 +53,10 @@ namespace ArdourWidgets {
 	class MetaButton;
 }
 
+class CrossCursor;
 class PianorollMidiView;
 class PianorollMidiBackground;
+class MidiInspector;
 
 struct ControllerControls : public Gtk::HBox {
 	ControllerControls (int num, std::string const & name, Gtk::RadioButtonGroup& group);
@@ -75,12 +80,21 @@ struct ControllerControls : public Gtk::HBox {
 class Pianoroll : public CueEditor
 {
   public:
-	Pianoroll (std::string const & name, bool with_transport_controls = false);
+	enum EditingPolicy {
+		AllViews,
+		ActiveView,
+	};
+
+
+	Pianoroll (std::string const & name, bool with_transport_controls = false, bool expandable = false, bool single_region = false);
 	~Pianoroll ();
 
 	Gtk::Widget& contents ();
 
 	samplecnt_t current_page_samples() const;
+
+	void set_editing_policy (EditingPolicy);
+	EditingPolicy editing_policy() const { return _editing_policy; }
 
 	void get_per_region_note_selection (std::list<std::pair<PBD::ID, std::set<std::shared_ptr<Evoral::Note<Temporal::Beats> > > > >&) const {}
 
@@ -94,12 +108,20 @@ class Pianoroll : public CueEditor
 	bool canvas_cue_start_event (GdkEvent* event, ArdourCanvas::Item*);
 	bool canvas_cue_end_event (GdkEvent* event, ArdourCanvas::Item*);
 	bool canvas_bg_event (GdkEvent* event, ArdourCanvas::Item*);
+	bool automation_group_event (GdkEvent* event, Evoral::Parameter);
+	bool automation_close_event (GdkEvent* event, Evoral::Parameter);
+	bool automation_clear_event (GdkEvent* event, Evoral::Parameter);
 
 	int32_t get_grid_beat_divisions (Editing::GridType gt) const { return 1; }
 	int32_t get_grid_music_divisions (Editing::GridType gt) const { return 1; }
 
+	std::shared_ptr<ARDOUR::MidiTrack> midi_track() const;
+
+	void add_region (std::shared_ptr<ARDOUR::Region>, std::shared_ptr<ARDOUR::Track>);
+	void replace_region (std::shared_ptr<ARDOUR::Region>, std::shared_ptr<ARDOUR::MidiTrack>);
+	void remove_regions ();
+	void remove_region (std::shared_ptr<ARDOUR::Region>);
 	void set_region (std::shared_ptr<ARDOUR::Region>);
-	void set_track (std::shared_ptr<ARDOUR::Track>);
 
 	double max_extents_scale() const { return 1.2; }
 	void set_samples_per_pixel (samplecnt_t);
@@ -133,7 +155,7 @@ class Pianoroll : public CueEditor
 	void keyboard_paste ();
 	void cut_copy (Editing::CutCopyOp);
 
-	PianorollMidiView* midi_view() const { return view; }
+	PianorollMidiView* midi_view() const { return _active_view; }
 	void set_session (ARDOUR::Session*);
 	bool allow_trim_cursors () const;
 
@@ -147,6 +169,34 @@ class Pianoroll : public CueEditor
 
 	void set_layered_automation (bool);
 	void set_note_highlight (uint8_t note);
+
+	void apply_note_range (uint8_t lowest, uint8_t highest);
+
+	void note_entered ();
+	void note_left ();
+
+	struct AutomationLane {
+		AutomationLane (Evoral::Parameter const &, Pianoroll const &, ArdourCanvas::Item*, uint32_t nth);
+		~AutomationLane ();
+
+		double height() const { return group->height(); }
+		void deduce_color (uint32_t nth);
+
+		ArdourCanvas::Rectangle* group;
+		ArdourCanvas::Text* label;
+		ArdourCanvas::Line* label_separator;
+		ArdourCanvas::Icon* close_x;
+		ArdourCanvas::Button* clear_button;
+	};
+
+	void add_automation_lane (Evoral::Parameter const & param);
+	void remove_automation_lane (Evoral::Parameter const & param);
+	void clear_automation_lane (Evoral::Parameter const & param);
+
+	bool get_midi_chord (int root_pitch, std::vector<int>& pitches) const;
+
+	void our_midi_view_selection_changed ();
+	void set_inspector_visibility (bool);
 
   protected:
 	Temporal::timepos_t snap_to_grid (Temporal::timepos_t const & start,
@@ -173,32 +223,47 @@ class Pianoroll : public CueEditor
 	void escape ();
 	void session_going_away ();
 
+	void set_color_mode (ARDOUR::ColorMode);
+	ARDOUR::ColorMode color_mode() const { return _color_mode; }
+
+	void motion_track (ArdourCanvas::Duple const &);
+	std::string parameter_name (Evoral::Parameter const &) const;
+
  private:
 	ArdourCanvas::Ruler*     bbt_ruler;
 	ArdourCanvas::Rectangle* tempo_bar;
 	ArdourCanvas::Rectangle* meter_bar;
 	ArdourCanvas::PianoRollHeader* prh;
+	EditingPolicy _editing_policy;
+	ARDOUR::ColorMode _color_mode;
 
-	ArdourWidgets::ArdourButton* layered_automation_button;
-	bool layered_automation;
-	void layered_automation_button_clicked();
+	ArdourWidgets::ArdourButton size_button;
+	ArdourWidgets::ArdourButton automation_button;
+	bool expandable;
+	bool single_region;
+	void toggle_size();
 
-	ControllerControls* velocity_button;
-	ControllerControls* bender_button;
-	ControllerControls* pressure_button;
-	ControllerControls* expression_button;
-	ControllerControls* modulation_button;
-#ifdef PIANOROLL_USER_BUTTONS
-	ControllerControls cc_dropdown1;
-	ControllerControls cc_dropdown2;
-	ControllerControls cc_dropdown3;
-#endif
-	typedef std::map<ControllerControls*,Evoral::Parameter> ParameterButtonMap;
-	ParameterButtonMap parameter_button_map;
-	void rebuild_parameter_button_map ();
+	ArdourWidgets::ArdourDropdown region_dropdown;
+	void rebuild_region_dropdown ();
+
+	ArdourWidgets::ArdourDropdown policy_dropdown;
+	ArdourWidgets::ArdourDropdown colors_dropdown;
+
+	bool no_toggle;
+	void toggle_automation (Evoral::Parameter param);
+	void add_single_controller_item (Gtk::Menu_Helpers::MenuList&, int, const std::string&);
+	void add_multi_controller_item (Gtk::Menu_Helpers::MenuList&, uint16_t, int, const std::string&);
+
+	typedef std::map<Evoral::Parameter, AutomationLane*> AutomationLanes;
+	AutomationLanes automation_lanes;
 
 	PianorollMidiBackground* bg;
-	PianorollMidiView* view;
+
+	typedef std::map<std::shared_ptr<ARDOUR::Region>, PianorollMidiView*> RegionMidiViewMap;
+	RegionMidiViewMap region_view_map;
+	void region_going_away (std::weak_ptr<ARDOUR::Region> region);
+
+	PianorollMidiView* _active_view;
 
 	void build_canvas ();
 	void canvas_allocate (Gtk::Allocation);
@@ -243,18 +308,14 @@ class Pianoroll : public CueEditor
 
 	sigc::signal<void> NoteModeChanged;
 
-	void automation_state_changed ();
-
 	void point_selection_changed ();
-
-	void add_single_controller_item (Gtk::Menu_Helpers::MenuList& ctl_items, int ctl, const std::string& name, ArdourWidgets::MetaButton*);
-	void add_multi_controller_item (Gtk::Menu_Helpers::MenuList& ctl_items, uint16_t channels, int ctl, const std::string& name, ArdourWidgets::MetaButton*);
-	void reset_user_cc_choice (std::string, Evoral::Parameter param, ArdourWidgets::MetaButton*);
 
 	bool ignore_channel_changes;
 	void visible_channel_changed ();
 
 	void map_transport_state ();
+	void session_located ();
+	void position_playhead_cursor (samplepos_t pos);
 
 	void update_tempo_based_rulers ();
 	void update_rulers() { update_tempo_based_rulers (); }
@@ -284,4 +345,33 @@ class Pianoroll : public CueEditor
 
 	Gtk::Menu* get_single_region_context_menu ();
 	MidiViews midiviews_from_region_selection (RegionSelection const &) const;
+
+	void setup_colors ();
+	void update_pitch_colors ();
+
+	CrossCursor* xcursor;
+
+	void partition_height ();
+	Evoral::Parameter automation_by_y (double y);
+
+	MidiInspector* midi_inspector;
+	Gtk::ScrolledWindow* inspector_scroller;
+	void replace_chord (std::vector<int> intervals);
+	void invert_selected_chord (bool up);
+	void drop_selected_chord (std::vector<int> which_notes);
+
+	ARDOUR::Quantize* get_quantize_op ();
+	sigc::connection selection_connection;
+
+	Gtk::Menu* build_automation_menu ();
+	void automation_button_clicked ();
+	void show_automation_for_all ();
+	static void build_midi_controller_name_map ();
+	static std::map<std::string,std::string> controller_name_map;
+
+	ArdourWidgets::ArdourButton inspector_button;
+	void inspector_button_clicked ();
+
+	void set_sensitivities ();
+	PianorollMidiView* empty_view;
 };

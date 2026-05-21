@@ -71,12 +71,12 @@ Downloader::Downloader (string const & u, string const & dir)
 {
 	if (!Glib::file_test (destdir, Glib::FILE_TEST_EXISTS)) {
 		if (g_mkdir_with_parents (destdir.c_str(), 0700) != 0) {
-			error << string_compose (_("Could not create clip library dir %1 (%2)"), destdir, strerror(errno)) << endmsg;
+			error << string_compose (_("Could not create download target directory %1 (%2)"), destdir, strerror(errno)) << endmsg;
 			throw failed_constructor();
 		}
 	} else {
 		if (!Glib::file_test (destdir, Glib::FILE_TEST_IS_DIR)) {
-			error << string_compose (_("Clip library dir (%1) is not a directory"), destdir) << endmsg;
+			error << string_compose (_("Download destination (%1) is not a directory"), destdir) << endmsg;
 			throw failed_constructor();
 		}
 	}
@@ -90,7 +90,10 @@ Downloader::~Downloader ()
 int
 Downloader::start ()
 {
-	file_path = Glib::build_filename (destdir, Glib::path_get_basename (url));
+	std::string filename = Glib::path_get_basename (url);
+	char* basename = curl_unescape (filename.c_str(), filename.length ());
+	file_path = Glib::build_filename (destdir, basename);
+	curl_free (basename);
 
 	if (!(file = fopen (file_path.c_str(), "w"))) {
 		return -1;
@@ -160,6 +163,9 @@ Downloader::download ()
 
 		if (res != CURLE_OK ) {
 			error << string_compose (_("Download failed, error code %1 (%2)"), curl_easy_strerror (res), curl_error) << endmsg;
+#ifndef NDEBUG
+			std::cerr << string_compose (_("Download failed, error code %1 (%2)"), curl_easy_strerror (res), curl_error) << "\n";
+#endif
 			_status = -2;
 			return;
 		}
@@ -175,17 +181,28 @@ Downloader::download ()
 	curl_easy_setopt (curl, CURLOPT_FOLLOWLOCATION, 1L);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlWrite_CallbackFunc_Downloader);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, this);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
 	CURLcode res = curl_easy_perform (curl);
 
-	if (res == CURLE_OK) {
+	long int rstatus;
+	curl_easy_getinfo (curl, CURLINFO_RESPONSE_CODE, &rstatus);
+
+	if (res == CURLE_OK && rstatus == 200) {
 		_status = 1;
 	} else {
 		_status = -1;
+		error << string_compose (_("Download failed, error code %1 (%2)"), curl_easy_strerror (res), curl_error) << endmsg;
+#ifndef NDEBUG
+		std::cerr << string_compose (_("Download failed, error code %1 (%2)"), curl_easy_strerror (res), curl_error) << "\n";
+#endif
 	}
 
 	if (file) {
 		fclose (file);
 		file = 0;
+	}
+	if (_status < 0) {
+		::g_unlink (file_path.c_str());
 	}
 }
 

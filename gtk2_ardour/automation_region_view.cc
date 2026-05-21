@@ -98,12 +98,12 @@ AutomationRegionView::create_line (std::shared_ptr<ARDOUR::AutomationList> list)
 {
 	_line = std::shared_ptr<EditorAutomationLine> (new MidiAutomationLine(
 				ARDOUR::EventTypeMap::instance().to_symbol(list->parameter()),
-				trackview, *get_canvas_group(), list,
+				trackview, *get_canvas_frame(), list,
 				std::dynamic_pointer_cast<ARDOUR::MidiRegion> (_region),
 				_parameter));
 	_line->set_colors();
 	_line->set_height ((uint32_t)rint(trackview.current_height() - 2.5 - NAME_HIGHLIGHT_SIZE));
-	_line->set_visibility (EditorAutomationLine::VisibleAspects (EditorAutomationLine::Line|EditorAutomationLine::ControlPoints));
+	_line->set_visibility (EditorAutomationLine::VisibleAspects (EditorAutomationLine::Line));
 	_line->set_maximum_time (timepos_t (_region->length()));
 	_line->set_offset (_region->start ());
 }

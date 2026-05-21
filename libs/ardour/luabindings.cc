@@ -57,9 +57,11 @@
 #include "ardour/buffer_set.h"
 #include "ardour/bundle.h"
 #include "ardour/chan_mapping.h"
+#include "ardour/control_protocol_manager.h"
 #include "ardour/convolver.h"
 #include "ardour/dB.h"
 #include "ardour/delayline.h"
+#include "ardour/demo_sessions.h"
 #include "ardour/disk_reader.h"
 #include "ardour/disk_writer.h"
 #include "ardour/dsp_filter.h"
@@ -283,6 +285,8 @@ CLASSKEYS(ARDOUR::AudioEngine);
 CLASSKEYS(ARDOUR::BufferSet);
 CLASSKEYS(ARDOUR::ChanCount);
 CLASSKEYS(ARDOUR::ChanMapping);
+CLASSKEYS(ARDOUR::ControlProtocolInfo);
+CLASSKEYS(ARDOUR::ControlProtocolManager);
 CLASSKEYS(ARDOUR::CoreSelection);
 CLASSKEYS(ARDOUR::DSP::DspShm);
 CLASSKEYS(ARDOUR::DataType);
@@ -330,6 +334,7 @@ CLASSKEYS(Evoral::ControlEvent);
 
 CLASSKEYS(std::list<Evoral::ControlEvent*>);
 CLASSKEYS(std::list<ARDOUR::TimelineRange>);
+CLASSKEYS(std::list<ARDOUR::ControlProtocolInfo>);
 
 CLASSKEYS(std::vector<Evoral::Parameter>);
 CLASSKEYS(std::vector<ARDOUR::Plugin::PresetRecord>);
@@ -2607,6 +2612,13 @@ LuaBindings::common (lua_State* L)
 		.addConst ("ForceChannel", ARDOUR::ChannelMode(ForceChannel))
 		.endNamespace ()
 
+		.beginNamespace ("ColorMode")
+		.addConst ("MeterColors", ARDOUR::ColorMode(MeterColors))
+		.addConst ("ChannelColors,", ARDOUR::ColorMode(ChannelColors))
+		.addConst ("TrackColor", ARDOUR::ColorMode(TrackColor))
+		.addConst ("PitchColors", ARDOUR::ColorMode(PitchColors))
+		.endNamespace ()
+
 		.beginNamespace ("PortFlags")
 		.addConst ("IsInput", ARDOUR::PortFlags(IsInput))
 		.addConst ("IsOutput", ARDOUR::PortFlags(IsOutput))
@@ -2728,6 +2740,20 @@ LuaBindings::common (lua_State* L)
 		.addConst ("Gate_KeyFilterFreq", ARDOUR::WellKnownCtrl(Gate_KeyFilterFreq))
 		.addConst ("Gate_Lookahead", ARDOUR::WellKnownCtrl(Gate_Lookahead))
 		.addConst ("Gate_FastAttack", ARDOUR::WellKnownCtrl(Gate_FastAttack))
+		.addConst ("DeEss_Enable", ARDOUR::WellKnownCtrl(DeEss_Enable))
+		.addConst ("DeEss_HiShelf", ARDOUR::WellKnownCtrl(DeEss_HiShelf))
+		.addConst ("DeEss_Threshold", ARDOUR::WellKnownCtrl(DeEss_Threshold))
+		.addConst ("DeEss_Attack", ARDOUR::WellKnownCtrl(DeEss_Attack))
+		.addConst ("DeEss_EssDepth", ARDOUR::WellKnownCtrl(DeEss_EssDepth))
+		.addConst ("DeEss_EssFreq", ARDOUR::WellKnownCtrl(DeEss_EssFreq))
+		.addConst ("DeEss_EssSolo", ARDOUR::WellKnownCtrl(DeEss_EssSolo))
+		.addConst ("DeEss_HiDepth", ARDOUR::WellKnownCtrl(DeEss_HiDepth))
+		.addConst ("DeEss_HiFreq", ARDOUR::WellKnownCtrl(DeEss_HiFreq))
+		.addConst ("DeEss_HiSolo", ARDOUR::WellKnownCtrl(DeEss_HiSolo))
+		.addConst ("Denoise_Enable", ARDOUR::WellKnownCtrl(Denoise_Enable))
+		.addConst ("Denoise_Threshold", ARDOUR::WellKnownCtrl(Denoise_Threshold))
+		.addConst ("Denoise_DepthLow", ARDOUR::WellKnownCtrl(Denoise_DepthLow))
+		.addConst ("Denoise_DepthHigh", ARDOUR::WellKnownCtrl(Denoise_DepthHigh))
 		.addConst ("Master_Limiter_Enable", ARDOUR::WellKnownCtrl(Master_Limiter_Enable))
 		.endNamespace ()
 
@@ -2741,6 +2767,12 @@ LuaBindings::common (lua_State* L)
 		.addConst ("Comp_Redux", ARDOUR::WellKnownData(Comp_Redux))
 		.addConst ("Gate_Meter", ARDOUR::WellKnownData(Gate_Meter))
 		.addConst ("Gate_Redux", ARDOUR::WellKnownData(Gate_Redux))
+		.addConst ("DeEss_Meter", ARDOUR::WellKnownData(DeEss_Meter))
+		.addConst ("DeEss_EssRedux", ARDOUR::WellKnownData(DeEss_EssRedux))
+		.addConst ("DeEss_HiRedux", ARDOUR::WellKnownData(DeEss_HiRedux))
+		.addConst ("Denoise_Meter", ARDOUR::WellKnownData(Denoise_Meter))
+		.addConst ("Denoise_ReduxLo", ARDOUR::WellKnownData(Denoise_ReduxLo))
+		.addConst ("Denoise_ReduxHi", ARDOUR::WellKnownData(Denoise_ReduxHi))
 		.endNamespace ()
 
 		.beginNamespace ("SampleFormat")
@@ -2971,6 +3003,7 @@ LuaBindings::common (lua_State* L)
 		.beginNamespace ("ARDOUR")
 		.addFunction ("user_config_directory", &ARDOUR::user_config_directory)
 		.addFunction ("user_cache_directory", &ARDOUR::user_cache_directory)
+		.addFunction ("inflate_demo_session", &ARDOUR::inflate_demo_session)
 		.endNamespace (); // end ARDOUR
 
 	luabridge::getGlobalNamespace (L)
@@ -3067,6 +3100,23 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("vcas", &VCAManager::vcas)
 		.addFunction ("n_vcas", &VCAManager::n_vcas)
 		.endClass()
+
+
+		.beginClass <ControlProtocolInfo> ("ControlProtocolInfo")
+		.addData ("name", &ControlProtocolInfo::name)
+		.addFunction ("active", &ControlProtocolInfo::active)
+		.endClass()
+
+		.beginConstStdList <ControlProtocolInfo*> ("ControlProtocolInfoList")
+		.endClass ()
+
+		.beginClass <ControlProtocolManager> ("ControlProtocolManager")
+		.addStaticFunction ("manager", &ControlProtocolManager::instance)
+		.addFunction ("control_protocol_infos", &ControlProtocolManager::control_protocol_infos)
+		.addFunction ("activate", &ControlProtocolManager::activate)
+		.addFunction ("deactivate", &ControlProtocolManager::deactivate)
+		.endClass()
+
 
 		.deriveClass <RCConfiguration, PBD::Configuration> ("RCConfiguration")
 #undef  CONFIG_VARIABLE

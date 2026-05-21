@@ -25,13 +25,13 @@ class PianorollVelocityDisplay : public VelocityDisplay
 {
   public:
 	PianorollVelocityDisplay (EditingContext&, MidiViewBackground&, MidiView&, ArdourCanvas::Rectangle& base_rect, Gtkmm2ext::Color oc);
+	~PianorollVelocityDisplay ();
 
 	void remove_note (NoteBase*);
 	void set_colors ();
 	void set_height (double);
 
   private:
-	ArdourCanvas::Container* _note_group;
 	GhostEvent::EventList events;
 	GhostEvent::EventList::iterator _optimization_iterator;
 
