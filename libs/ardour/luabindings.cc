@@ -258,7 +258,7 @@ CLASSINFO(TrackViewList);
 CLASSINFO(UIConfiguration);
 
 /* this needs to match gtk2_ardour/luasignal.h */
-CLASSKEYS(std::bitset<50ul>); // LuaSignal::LAST_SIGNAL
+CLASSKEYS(std::bitset<52ul>); // LuaSignal::LAST_SIGNAL
 
 CLASSKEYS(void);
 CLASSKEYS(float);
@@ -368,6 +368,7 @@ CLASSKEYS(std::shared_ptr<ARDOUR::MidiRegion>);
 CLASSKEYS(std::shared_ptr<ARDOUR::MidiSource>);
 CLASSKEYS(std::shared_ptr<ARDOUR::PluginInfo>);
 CLASSKEYS(std::shared_ptr<ARDOUR::PluginInsert>);
+CLASSKEYS(std::shared_ptr<ARDOUR::Port>);
 CLASSKEYS(std::shared_ptr<ARDOUR::RegionFxPlugin>);
 CLASSKEYS(std::shared_ptr<ARDOUR::Route>);
 CLASSKEYS(std::shared_ptr<ARDOUR::RouteGroup>);
@@ -387,6 +388,7 @@ CLASSKEYS(std::shared_ptr<Evoral::PatchChange<Temporal::Beats> >);
 CLASSKEYS(std::shared_ptr<Evoral::Sequence<Temporal::Beats> >);
 
 CLASSKEYS(std::weak_ptr<ARDOUR::Bundle>);
+CLASSKEYS(std::weak_ptr<ARDOUR::Port>);
 CLASSKEYS(std::weak_ptr<ARDOUR::Route>);
 CLASSKEYS(std::weak_ptr<ARDOUR::Track>);
 CLASSKEYS(std::weak_ptr<ARDOUR::VCA>);
@@ -2754,6 +2756,7 @@ LuaBindings::common (lua_State* L)
 		.addConst ("Denoise_Threshold", ARDOUR::WellKnownCtrl(Denoise_Threshold))
 		.addConst ("Denoise_DepthLow", ARDOUR::WellKnownCtrl(Denoise_DepthLow))
 		.addConst ("Denoise_DepthHigh", ARDOUR::WellKnownCtrl(Denoise_DepthHigh))
+		.addConst ("Denoise_Makeup", ARDOUR::WellKnownCtrl(Denoise_Makeup))
 		.addConst ("Master_Limiter_Enable", ARDOUR::WellKnownCtrl(Master_Limiter_Enable))
 		.endNamespace ()
 

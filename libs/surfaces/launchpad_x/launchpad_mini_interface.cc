@@ -37,7 +37,7 @@ using namespace ArdourSurface;
 using namespace ArdourSurface::LAUNCHPAD_NAMESPACE;
 
 static ControlProtocol*
-new_lpmini (Session* s)
+new_lpmini (Session* s, std::string const & config)
 {
 	LaunchPadX * lpm = nullptr;
 
@@ -46,7 +46,7 @@ new_lpmini (Session* s)
 		/* do not set active here - wait for set_state() */
 	}
 	catch (std::exception & e) {
-		error << "Error instantiating LaunchPad Mini support: " << e.what() << endmsg;
+		error << "Error instantiating Launchpad Mini support: " << e.what() << endmsg;
 		delete lpm;
 		lpm = nullptr;
 	}
@@ -63,7 +63,7 @@ delete_lpmini (ControlProtocol* cp)
 	}
 	catch ( std::exception & e )
 	{
-		std::cout << "Exception caught trying to finalize LaunchPad Mini support: " << e.what() << std::endl;
+		std::cout << "Exception caught trying to finalize Launchpad Mini support: " << e.what() << std::endl;
 	}
 }
 
@@ -74,8 +74,14 @@ probe_lpmini_midi_protocol ()
 	return LaunchPadX::probe (i, o);
 }
 
+static std::map<std::string, std::vector<std::string>>
+enumerate_lpmini ()
+{
+	return {{"Novation", {"Launchpad Mini"}}};
+}
+
 static ControlProtocolDescriptor lpmini_descriptor = {
-	/* name       */ "Novation LaunchPad Mini",
+	/* name       */ "Novation Launchpad Mini",
 	/* id         */ "uri://ardour.org/surfaces/lpmini:0",
 	/* module     */ 0,
 	/* available  */ 0,
@@ -83,6 +89,7 @@ static ControlProtocolDescriptor lpmini_descriptor = {
 	/* match usb  */ 0, // LaunchPadX::match_usb,
 	/* initialize */ new_lpmini,
 	/* destroy    */ delete_lpmini,
+	/* enumerate  */ enumerate_lpmini,
 };
 
 extern "C" ARDOURSURFACE_API ControlProtocolDescriptor* protocol_descriptor () { return &lpmini_descriptor; }

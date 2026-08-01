@@ -59,7 +59,6 @@ PianoRollHeaderBase::PianoRollHeaderBase (MidiViewBackground& bg)
 	, _dragging (false)
 	, _scroomer_size (60.f)
 	, _scroomer_drag (false)
-	, scroomer_did_drag (false)
 	, _old_y (0.0)
 	, _fract (0.0)
 	, _scroomer_state (NONE)
@@ -520,7 +519,6 @@ PianoRollHeaderBase::motion_handler (GdkEventMotion* ev)
 			_fract = (_fract + note_range > 127.0)? 127.0 - note_range : _fract;
 			_fract = max(0.0, _fract);
 			_adj.set_value (min(_fract, 127.0 - note_range));
-			scroomer_did_drag = true;
 			break;
 
 		case TOP:
@@ -530,7 +528,6 @@ PianoRollHeaderBase::motion_handler (GdkEventMotion* ev)
 			_saved_top_val  = idle_upper;
 			if (!scroomer_drag_connection.connected()) {
 				scroomer_drag_connection = Glib::signal_idle().connect (sigc::mem_fun (*this, &PianoRollHeaderBase::idle_apply_range));
-				scroomer_did_drag = true;
 			}
 			break;
 
@@ -541,7 +538,6 @@ PianoRollHeaderBase::motion_handler (GdkEventMotion* ev)
 			_saved_bottom_val = idle_lower;
 			if (!scroomer_drag_connection.connected()) {
 				scroomer_drag_connection = Glib::signal_idle().connect (sigc::mem_fun (*this, &PianoRollHeaderBase::idle_apply_range));
-				scroomer_did_drag = true;
 			}
 			break;
 
@@ -609,7 +605,7 @@ PianoRollHeaderBase::idle_apply_range ()
 	/* Check if the range is valid before submitting it to avoid
 	 * range automatic adjustment during dragging
 	 */
-	if (idle_upper - idle_lower >= 11 && _midi_context.contents_height() / (idle_upper - idle_lower) <= UIConfiguration::instance().get_max_note_height()) {
+	if (idle_upper - idle_lower >= 11 && _midi_context.contents_height() / (idle_upper - idle_lower) <= UIConfiguration::instance().get_max_note_height() * UIConfiguration::instance().get_ui_scale()) {
 		_midi_context.apply_note_range (idle_lower, idle_upper, true);
 	}
 	scroomer_drag_connection.disconnect ();
@@ -620,7 +616,6 @@ void
 PianoRollHeaderBase::begin_scroomer_drag (double evy)
 {
 	_scroomer_drag = true;
-	scroomer_did_drag = false;
 	_old_y = evy;
 	_fract = _adj.get_value();
 	_fract_top = _adj.get_value() + _adj.get_page_size();
@@ -630,10 +625,6 @@ void
 PianoRollHeaderBase::end_scroomer_drag ()
 {
 	_scroomer_drag = false;
-	if (scroomer_did_drag) {
-		_midi_context.set_note_visibility_range_style (MidiViewBackground::UserRange);
-	}
-	scroomer_did_drag = false;
 }
 
 bool
@@ -648,7 +639,7 @@ PianoRollHeaderBase::button_press_handler (GdkEventButton* ev)
 		/* button press on scroomer handler */
 
 		if (ev->button == 1 && ev->type == GDK_2BUTTON_PRESS) {
-			if (_midi_context.visibility_range_style () == MidiViewBackground::FullRange) {
+			if (_midi_context.visibility_range_style () != MidiViewBackground::ContentsRange) {
 				_midi_context.set_note_visibility_range_style (MidiViewBackground::ContentsRange);
 			} else {
 				_midi_context.set_note_visibility_range_style (MidiViewBackground::FullRange);

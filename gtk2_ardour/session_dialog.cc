@@ -94,13 +94,13 @@ SessionDialog::SessionDialog (DialogTab initial_tab, const std::string& session_
 
 	/* No string translation because these don't show anywhere */
 	new_session_action = Action::create (X_("New"));
-	action_group->add (new_session_action, sigc::mem_fun (this, &SessionDialog::new_button_choice_action));
+	action_group->add (new_session_action, sigc::mem_fun (*this, &SessionDialog::new_button_choice_action));
 	recent_session_action = Action::create (X_("Recent"));
-	action_group->add (recent_session_action, sigc::mem_fun (this, &SessionDialog::recent_button_choice_action));
+	action_group->add (recent_session_action, sigc::mem_fun (*this, &SessionDialog::recent_button_choice_action));
 	existing_session_action = Action::create (X_("Open"));
-	action_group->add (existing_session_action, sigc::mem_fun (this, &SessionDialog::existing_button_choice_action));
+	action_group->add (existing_session_action, sigc::mem_fun (*this, &SessionDialog::existing_button_choice_action));
 	demo_session_action = Action::create (X_("DemoSessions"));
-	action_group->add (demo_session_action, sigc::mem_fun (this, &SessionDialog::demo_button_choice_action));
+	action_group->add (demo_session_action, sigc::mem_fun (*this, &SessionDialog::demo_button_choice_action));
 
 	set_position (WIN_POS_CENTER);
 	get_vbox()->set_spacing (6);
@@ -604,7 +604,7 @@ SessionDialog::setup_existing_box ()
 
 	Gtkmm2ext::add_volume_shortcuts (existing_session_chooser);
 
-	existing_session_chooser.signal_selection_changed().connect (mem_fun (this, &SessionDialog::existing_file_selected));
+	existing_session_chooser.signal_selection_changed().connect (mem_fun (*this, &SessionDialog::existing_file_selected));
 	existing_session_chooser.signal_file_activated().connect (sigc::mem_fun (*this, &SessionDialog::existing_file_activated));
 }
 
@@ -966,7 +966,7 @@ SessionDialog::setup_demo_sessions ()
 	demo_display.append_column (_("Session Name"), demo_columns.name);
 	demo_display.append_column (_("Download Size"), demo_columns.download_size);
 
-	Gtk::CellRendererProgress* progress_renderer = new Gtk::CellRendererProgress();
+	Gtk::CellRendererProgress* progress_renderer = manage (new Gtk::CellRendererProgress());
 	progress_renderer->property_width() = std::max<int>(100, rintf(100. * UIConfiguration::instance().get_ui_scale()));
 	Gtk::TreeViewColumn* tvc = manage (new Gtk::TreeViewColumn ("", *progress_renderer));
 	tvc->add_attribute (*progress_renderer, "value", demo_columns.progress);
@@ -981,6 +981,10 @@ SessionDialog::setup_demo_sessions ()
 	demo_folder_chooser.set_title (_("Select folder for session"));
 	Gtkmm2ext::add_volume_shortcuts (demo_folder_chooser);
 	demo_folder_chooser.set_current_folder (poor_mans_glob (Config->get_default_session_parent_dir()));
+
+	demo_author.set_alignment (Gtk::ALIGN_LEFT, Gtk::ALIGN_CENTER);
+	demo_license.set_alignment (Gtk::ALIGN_LEFT, Gtk::ALIGN_CENTER);
+	demo_license.signal_activate_link().connect ([](std::string const& url) { return PBD::open_uri (url); }, false);
 
 	demo_description.set_wrap_mode (Gtk::WRAP_WORD);
 	demo_description.set_editable (false);
@@ -997,8 +1001,17 @@ SessionDialog::setup_demo_sessions ()
 	demo_scroller.set_policy (Gtk::POLICY_NEVER, Gtk::POLICY_AUTOMATIC);
 	demo_scroller.set_shadow_type	(Gtk::SHADOW_IN);
 
-	Label* folder_label = manage (new Label (_("Extract demo session to:")));;
-	Label* name_label   = manage (new Label (_("Session name:")));
+	Label* author_label  = manage (new Label (_("Author:"), ALIGN_LEFT));
+	Label* license_label = manage (new Label (_("License:"), ALIGN_LEFT));
+	Label* folder_label  = manage (new Label (_("Extract demo session to:")));;
+	Label* name_label    = manage (new Label (_("Session name:")));
+
+	Table* license_tabel = manage (new Table);
+	license_tabel->set_spacings (8);
+	license_tabel->attach (*author_label,  0, 1, 0, 1, FILL,          SHRINK);
+	license_tabel->attach (demo_author,    1, 2, 0, 1, EXPAND | FILL, SHRINK);
+	license_tabel->attach (*license_label, 0, 1, 1, 2, FILL,          SHRINK);
+	license_tabel->attach (demo_license,   1, 2, 1, 2, EXPAND | FILL, SHRINK);
 
 	HBox* folder_hbox = manage (new HBox);
 	folder_hbox->set_spacing (8);
@@ -1019,6 +1032,7 @@ SessionDialog::setup_demo_sessions ()
 
 	demo_vbox.pack_start (demo_scroller, true, true);
 	demo_vbox.pack_start (demo_desc_frame, false, false);
+	demo_vbox.pack_start (*license_tabel, false, false);
 	demo_vbox.pack_start (*folder_hbox, false, false);
 	demo_vbox.pack_start (*name_hbox, false, false);
 	demo_vbox.set_spacing (8);
@@ -1480,6 +1494,8 @@ SessionDialog::add_demo_session (ARDOUR::RemoteResourceInfo const& ld)
 	(*i)[demo_columns.file]          = ld.toplevel_dir();
 	(*i)[demo_columns.downloading]   = false;
 	(*i)[demo_columns.description]   = Glib::Markup::escape_text (ld.description());
+	(*i)[demo_columns.license]       = ld.license();
+	(*i)[demo_columns.author]        = ld.author();
 
 	string demo_filename = ld.toplevel_dir();
 	string demo_session_archive = Glib::build_filename (demo_session_dir (), demo_filename);
@@ -1517,6 +1533,8 @@ SessionDialog::demo_session_selected ()
 {
 	if (demo_display.get_selection()->count_selected_rows() == 0) {
 		demo_description.get_buffer()->set_text (string());
+		demo_license.set_text (string());
+		demo_author.set_text (string ());
 		open_button->set_sensitive(false);  //do not allow to open a session from this page
 		return;
 	}
@@ -1524,8 +1542,17 @@ SessionDialog::demo_session_selected ()
   Gtk::TreeModel::iterator row = demo_display.get_selection()->get_selected();
   string name = (*row)[demo_columns.name];
 	string desc = (*row)[demo_columns.description];
+	string lcns = (*row)[demo_columns.license];
+	string athr = (*row)[demo_columns.author];
 	demo_name_entry.set_text (name);
+	demo_author.set_text (athr);
+	demo_license.set_markup (lcns);
 	demo_description.get_buffer()->set_text (desc);
+
+	if (lcns.find ("<a href=") != lcns.npos) {
+		demo_license.property_track_visited_links() = false;
+	}
+
 }
 
 void

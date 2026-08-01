@@ -118,6 +118,26 @@ IO::ports () const {
 }
 
 void
+IO::set_scale_provider (ScaleProvider* sp)
+{
+	if (_direction != Input) {
+		return;
+	}
+
+	size_t n = 0;
+
+	do {
+		std::shared_ptr<MidiPort> mp = ports()->nth_midi_port (n);
+		if (!mp) {
+			break;
+		}
+		mp->set_scale_provider (sp);
+		++n;
+
+	}  while (true);
+}
+
+void
 IO::connection_change (std::shared_ptr<Port> a, std::shared_ptr<Port> b)
 {
 	if (_session.deletion_in_progress ()) {
@@ -609,13 +629,18 @@ IO::set_state (const XMLNode& node, int version)
 		return set_port_state_2X (node, version, false);
 	}
 
-	XMLProperty const * prop;
+	set_port_state (node, version);
+	return 0;
+}
 
+void
+IO::set_port_state (const XMLNode& node, int version)
+{
 	for (XMLNodeConstIterator i = node.children().begin(); i != node.children().end(); ++i) {
 
 		if ((*i)->name() == "Port") {
 
-			prop = (*i)->property (X_("name"));
+			XMLProperty const * prop = (*i)->property (X_("name"));
 
 			if (!prop) {
 				continue;
@@ -635,9 +660,8 @@ IO::set_state (const XMLNode& node, int version)
 			}
 		}
 	}
-
-	return 0;
 }
+
 
 int
 IO::set_state_2X (const XMLNode& node, int version, bool in)
@@ -912,8 +936,14 @@ IO::set_port_state_2X (const XMLNode& node, int /*version*/, bool in)
 					if (p != string::npos) {
 						ports[x].replace (p, 4, "/audio_out");
 					}
-					if (NULL != nth(i).get())
+					if (!nth(i).get()) {
+						continue;
+					}
+					if (_session.inital_connect_or_deletion_in_progress ()) {
+						nth(i)->initial_v2_connection (ports[x]);
+					} else{
 						nth(i)->connect (ports[x]);
+					}
 				}
 			}
 
@@ -944,9 +974,7 @@ IO::set_port_state_2X (const XMLNode& node, int /*version*/, bool in)
 
 			if ((n = parse_io_string (str.substr (start, end - start), ports)) < 0) {
 				error << string_compose(_("IO: bad output string in XML node \"%1\""), str) << endmsg;
-
 				return -1;
-
 			} else if (n > 0) {
 
 				for (int x = 0; x < n; ++x) {
@@ -955,8 +983,14 @@ IO::set_port_state_2X (const XMLNode& node, int /*version*/, bool in)
 					if (p != string::npos) {
 						ports[x].replace (p, 3, "/audio_in");
 					}
-					if (NULL != nth(i).get())
+					if (!nth(i).get()) {
+						continue;
+					}
+					if (_session.inital_connect_or_deletion_in_progress ()) {
+						nth(i)->initial_v2_connection (ports[x]);
+					}  else {
 						nth(i)->connect (ports[x]);
+					}
 				}
 			}
 

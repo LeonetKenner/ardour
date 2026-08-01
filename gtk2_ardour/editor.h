@@ -67,6 +67,7 @@
 
 #include "application_bar.h"
 #include "ardour_dialog.h"
+#include "cross_cursor.h"
 #include "public_editor.h"
 #include "editing.h"
 #include "enums.h"
@@ -127,6 +128,7 @@ class EditorRoutes;
 class EditorRouteGroups;
 class EditorSnapshots;
 class EditorSummary;
+class EditorVSummary;
 class GUIObjectState;
 class ArdourMarker;
 class MidiRegionView;
@@ -320,6 +322,7 @@ public:
 
 	void toggle_zero_line_visibility ();
 	void set_summary ();
+	void set_vsummary ();
 	void set_group_tabs ();
 
 	/* returns the left-most and right-most time that the gui should allow the user to scroll to */
@@ -342,6 +345,7 @@ public:
 
 	bool scroll_up_one_track (bool skip_child_views = false);
 	bool scroll_down_one_track (bool skip_child_views = false);
+	bool scroll_to_track_at_y (double y, bool skip_child_views = false);
 
 	void select_topmost_track ();
 
@@ -1576,7 +1580,7 @@ private:
 	void replace_chord (std::vector<int> intervals);
 	void invert_selected_chord (bool up);
 	void drop_selected_chord (std::vector<int> which_notes);
-	bool get_midi_chord (int root_pitch, std::vector<int>& pitches) const;
+	bool get_midi_chord (int root_pitch, std::vector<int>& pitches, bool& arpeggiate) const;
 	void midi_view_selection_changed (SimpleMidiNoteSelection& selection);
 
 protected:
@@ -2151,6 +2155,9 @@ private:
 	Gtk::VBox _summary_vbox;
 	EditorSummary* _summary;
 
+	Gtk::Frame _vsummary_frame;
+	EditorVSummary* _vsummary;
+
 	void region_view_added (RegionView*);
 	void region_view_removed ();
 
@@ -2295,6 +2302,11 @@ private:
 	void midi_view_selection_changed (SimpleMidiNoteSelection selection);
 	sigc::connection midi_view_selection_connection;
 
+	CrossCursor* xcursor;
+	sigc::connection xcursor_connection;
+	void motion_track (ArdourCanvas::Duple const &);
+	void maybe_enable_cross_cursor ();
+
 	friend class RegionMoveDrag;
 	friend class TrimDrag;
 	friend class MappingTwistDrag;
@@ -2324,6 +2336,7 @@ private:
 	friend class VideoTimeLineDrag;
 
 	friend class EditorSummary;
+	friend class EditorVSummary;
 	friend class EditorGroupTabs;
 
 	friend class EditorRoutes;

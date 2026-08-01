@@ -126,6 +126,7 @@
 #include "editor_snapshots.h"
 #include "editor_sources.h"
 #include "editor_summary.h"
+#include "editor_vsummary.h"
 #include "enums_convert.h"
 #include "export_report.h"
 #include "global_port_matrix.h"
@@ -287,7 +288,7 @@ Editor::Editor ()
 	, videotl_group (nullptr)
 	, videotl_bar_height (4)
 	, _region_boundary_cache_dirty (true)
-	, edit_packer (4, 4, true)
+	, edit_packer (5, 4, true)
 	, unused_adjustment (0.0, 0.0, 10.0, 400.0)
 	, controls_layout (unused_adjustment, vertical_adjustment)
 	, _scroll_callbacks (0)
@@ -367,6 +368,7 @@ Editor::Editor ()
 	, _pending_locate_request (false)
 	, _pending_initial_locate (false)
 	, _summary (nullptr)
+	, _vsummary (nullptr)
 	, _group_tabs (nullptr)
 	, _last_motion_y (0)
 	, layering_order_editor (nullptr)
@@ -381,6 +383,7 @@ Editor::Editor ()
 	, _visible_marker_types (all_marker_types)
 	, _visible_range_types (all_range_types)
 	, _midi_inspector (nullptr)
+	, xcursor (nullptr)
 {
 	/* we are a singleton */
 
@@ -440,9 +443,11 @@ Editor::Editor ()
 
 	initialize_canvas ();
 
-	CairoWidget::set_focus_handler (sigc::mem_fun (ARDOUR_UI::instance(), &ARDOUR_UI::reset_focus));
+	CairoWidget::set_focus_handler (sigc::mem_fun (*ARDOUR_UI::instance(), &ARDOUR_UI::reset_focus));
 
 	_summary = new EditorSummary (*this);
+
+	_vsummary = new EditorVSummary (*this);
 
 	TempoMap::MapChanged.connect (tempo_map_connection, invalidator (*this), std::bind (&Editor::tempo_map_changed, this), gui_context());
 
@@ -479,6 +484,7 @@ Editor::Editor ()
 	controls_layout.signal_scroll_event().connect (sigc::mem_fun(*this, &Editor::control_layout_scroll), false);
 
 	_group_tabs->signal_scroll_event().connect (sigc::mem_fun(*this, &Editor::control_layout_scroll), false);
+	_vsummary->signal_scroll_event().connect (sigc::mem_fun(*this, &Editor::control_layout_scroll), false);
 
 	set_canvas_cursor (nullptr);
 
@@ -518,6 +524,11 @@ Editor::Editor ()
 	edit_packer.attach (controls_layout,         2, 3, 1, 2,    FILL,        FILL|EXPAND, 0, 0);
 	/* canvas */
 	edit_packer.attach (*_track_canvas_viewport, 3, 4, 0, 2,    FILL|EXPAND, FILL|EXPAND, 0, 0);
+	/* vertical summary */
+	_vsummary_frame.set_name("SummaryFrame");
+	_vsummary_frame.add(*_vsummary);
+	edit_packer.attach (_vsummary_frame,         4, 5, 1, 2,    FILL,        FILL|EXPAND, 0, 0);
+	_vsummary->set_size_request(20 * UIConfiguration::instance().get_ui_scale(), -1);
 
 	PresentationInfo::Change.connect (*this, MISSING_INVALIDATOR, std::bind (&Editor::presentation_info_changed, this, _1), gui_context());
 
@@ -684,7 +695,16 @@ Editor::Editor ()
 	add_notebook_page (_("Snaps"), _("Snapshots"), _snapshots->widget ());
 	add_notebook_page (_("Groups"), _("Track & Bus Groups"), _route_groups->widget ());
 	add_notebook_page (_("Marks"), _("Ranges & Marks"), _locations->widget ());
-	add_notebook_page (_("Inspector"), _("MIDI Inspector"), *_midi_inspector);
+
+	/* Don't want to create adjustments for this, and C++ API doesn't allow
+	 * a ScrolledWindow without specified adjustments (unlike the C
+	 * one). So ... fall back to C API.
+	 */
+
+	Gtk::ScrolledWindow* sw = wrap (GTK_SCROLLED_WINDOW (gtk_scrolled_window_new (nullptr, nullptr)));
+	sw->set_policy (Gtk::POLICY_AUTOMATIC, Gtk::POLICY_AUTOMATIC);
+	sw->add (*_midi_inspector);
+	add_notebook_page (_("MIDI Tools"), _("MIDI Tools"), *sw);
 
 	_notebook_tab2.set_index (4);
 
@@ -1273,6 +1293,7 @@ Editor::set_session (Session *t)
 	_application_bar.set_session (_session);
 	nudge_clock->set_session (_session);
 	_summary->set_session (_session);
+	_vsummary->set_session (_session);
 	_group_tabs->set_session (_session);
 	_route_groups->set_session (_session);
 	_regions->set_session (_session);
@@ -4009,6 +4030,7 @@ Editor::visual_changer (const VisualChange& vc)
 
 	_region_peak_cursor->hide ();
 	_summary->set_overlays_dirty ();
+	_vsummary->set_overlays_dirty();
 }
 
 void
@@ -4731,7 +4753,30 @@ Editor::add_stripables (StripableList& sl)
 	std::shared_ptr<Route> r;
 	TrackViewList new_selection;
 	bool changed = false;
-	bool from_scratch = (track_views.size() == 0);
+	int32_t real_routes = 0;
+
+	/* Count the number of "normal" tracks & busses */
+
+	{
+		std::shared_ptr<RouteList const> rl (_session->get_routes());
+
+		for (auto const & r : *rl) {
+			if (r->is_normal_route()) {
+				real_routes++;
+			}
+		}
+	}
+
+	/* Session::get_routes() will include the ones we just added */
+
+	for (auto & s : sl) {
+		if (s->is_normal_route()) {
+			real_routes--;
+		}
+	}
+
+	bool from_scratch = (real_routes <= 0);
+	bool initial_selection = (from_scratch || _no_not_select_reimported_tracks);
 
 	sl.sort (Stripable::Sorter());
 
@@ -4772,7 +4817,11 @@ Editor::add_stripables (StripableList& sl)
 			}
 
 			track_views.push_back (rtv);
-			new_selection.push_back (rtv);
+			if (!initial_selection || new_selection.empty()) {
+				if (r->is_normal_route()) {
+					new_selection.push_back (rtv);
+				}
+			}
 
 			rtv->effective_gain_display ();
 
@@ -4791,7 +4840,7 @@ Editor::add_stripables (StripableList& sl)
 	 * than just VCAs
 	 */
 
-	if (!from_scratch && !_no_not_select_reimported_tracks && !new_selection.empty()) {
+	if (!new_selection.empty() && !ARDOUR_UI::instance()->loading_session ()) {
 		selection->set (new_selection);
 		begin_selection_op_history();
 	}
@@ -5098,6 +5147,7 @@ Editor::redisplay_track_views ()
 	}
 
 	_summary->set_background_dirty();
+	_vsummary->set_background_dirty();
 	_group_tabs->set_dirty ();
 
 	return false;
@@ -5620,6 +5670,10 @@ Editor::ui_parameter_changed (string parameter)
 		_track_canvas->request_redraw (_track_canvas->visible_area());
 	} else if (parameter == "show-selection-marker") {
 		update_ruler_visibility ();
+	} else if (parameter == "use-cross-cursor") {
+		maybe_enable_cross_cursor ();
+	} else if (parameter == "show-region-gain") {
+		set_gain_envelope_visibility ();
 	}
 }
 
@@ -5653,6 +5707,7 @@ Editor::use_own_window (bool and_fill_it)
 
 	/* re-hide stuff if necessary */
 	parameter_changed ("show-summary");
+	parameter_changed ("show-vertical-summary");
 	parameter_changed ("show-group-tabs");
 	parameter_changed ("show-zoom-tools");
 

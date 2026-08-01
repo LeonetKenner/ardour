@@ -60,7 +60,7 @@ public:
 
 class GenericMidiControlProtocol : public ARDOUR::ControlProtocol, public AbstractUI<GenericMIDIRequest> {
 public:
-	GenericMidiControlProtocol (ARDOUR::Session&);
+	GenericMidiControlProtocol (ARDOUR::Session&, std::string const & config);
 	virtual ~GenericMidiControlProtocol();
 
 	void do_request (GenericMIDIRequest*);
@@ -93,6 +93,7 @@ public:
 	void* get_gui () const;
 	void  tear_down_gui ();
 
+	static std::map<std::string, std::vector<std::string>> enumerate ();
 	int load_bindings (const std::string&);
 	void drop_bindings ();
 	void drop_all ();
@@ -192,6 +193,7 @@ private:
 	PBD::ScopedConnection _port_connection;
 
 	std::string _current_binding;
+	std::string _config;
 	uint32_t _bank_size;
 	uint32_t _current_bank;
 	/** true if this surface is motorised.  If it is, we assume

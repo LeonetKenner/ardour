@@ -47,6 +47,7 @@
 #include "ardour/operations.h"
 #include "ardour/quantize.h"
 #include "ardour/session.h"
+#include "ardour/scale.h"
 #include "ardour/strum.h"
 
 #include "evoral/Parameter.h"
@@ -951,11 +952,18 @@ MidiView::create_note_at (timepos_t const & source_relative_start, double y, Tem
 		return;
 	}
 
+	const int  note        = y_to_note(y);
+
+	std::shared_ptr<MidiTrack> mt  (midi_track());
+	MusicalKey const * key (mt->key());
+
+	if ((mt->key_enforcement_policy() & NoInsert) && (key && !key->in_key (note))) {
+		return;
+	}
+
 	/* assume time is already source-relative and snapped */
 
 	Temporal::Beats t = source_relative_start.beats();
-
-	const int  note        = y_to_note(y);
 	const uint8_t chan     = get_channel_for_add (t);
 	const uint8_t velocity = get_velocity_for_add (t);
 
@@ -966,8 +974,9 @@ MidiView::create_note_at (timepos_t const & source_relative_start, double y, Tem
 	}
 
 	std::vector<int> pitches;
+	bool arpeggiate = false;
 
-	if (_editing_context.get_midi_chord (note, pitches)) {
+	if (_editing_context.get_midi_chord (note, pitches, arpeggiate)) {
 
 		list<Evoral::event_id_t> to_be_selected;
 		start_note_diff_command(_("add chord"), control_reversible_command);
@@ -976,6 +985,9 @@ MidiView::create_note_at (timepos_t const & source_relative_start, double y, Tem
 			const std::shared_ptr<NoteType> new_note (new NoteType (chan, t, length, p, velocity));
 			note_diff_add_note (new_note, true, false);
 			to_be_selected.push_back (new_note->id());
+			if (arpeggiate) {
+				t += length;
+			}
 		}
 
 		apply_note_diff (!control_reversible_command);
@@ -1057,7 +1069,6 @@ MidiView::chord_is_selected () const
 		return false;
 	}
 
-	size_t cnt = 1;
 	auto s = _selection.begin();
 
 	Temporal::Beats start = (*s)->note()->time();
@@ -1068,7 +1079,6 @@ MidiView::chord_is_selected () const
 		if (delta.abs() > Temporal::Beats (0, 15)) { /* 1/128th note */
 			return false;
 		}
-		++cnt;
 		++s;
 	}
 	return true;
@@ -2192,6 +2202,10 @@ MidiView::color_note (NoteBase* ev, int channel)
 
 	if (!note_editable (ev)) {
 		base_color = Gtkmm2ext::change_alpha (base_color, 0.15);
+	}
+
+	if ((midi_track()->key_enforcement_policy() & NoDraw) && !midi_track()->key()->in_key (ev->note()->note())) {
+		base_color = Gtkmm2ext::change_alpha (base_color, 0.05);
 	}
 
 	ev->set_fill_color (base_color);
@@ -3355,6 +3369,9 @@ MidiView::note_dropped (NoteBase *, timecnt_t const & d_qn, int8_t dnote, bool c
 
 	Temporal::Beats last_note_off;
 
+	std::shared_ptr<MidiTrack> mt  (midi_track());
+	MusicalKey const * key (mt->key());
+
 	if (!copy) {
 		// find highest and lowest notes first
 
@@ -3384,19 +3401,26 @@ MidiView::note_dropped (NoteBase *, timecnt_t const & d_qn, int8_t dnote, bool c
 		for (auto & sel : _selection) {
 
 			Temporal::Beats new_time = sel->note()->time() + d_qn.beats ();
+			uint8_t original_pitch = sel->note()->note();
+			uint8_t new_pitch      = original_pitch + dnote - highest_note_difference;
 
 			if (new_time < Temporal::Beats()) {
 				continue;
 			}
+
+			int conformed_pitch = key->conform_midi_note (new_pitch, mt->key_enforcement_policy());
+
+			if (conformed_pitch < 0) {
+				continue;
+			}
+
+			new_pitch = (conformed_pitch & 0x7f);
 
 			last_note_off = std::max (last_note_off, new_time + sel->note()->length());
 
 			if (new_time != sel->note()->time()) {
 				note_diff_add_change (sel, MidiModel::NoteDiffCommand::StartTime, new_time);
 			}
-
-			uint8_t original_pitch = sel->note()->note();
-			uint8_t new_pitch      = original_pitch + dnote - highest_note_difference;
 
 			// keep notes in standard midi range
 			clamp_to_0_127(new_pitch);
@@ -3429,18 +3453,26 @@ MidiView::note_dropped (NoteBase *, timecnt_t const & d_qn, int8_t dnote, bool c
 
 			/* update time */
 			Temporal::Beats new_time = copy_event->note()->time() + d_qn.beats();
+			uint8_t original_pitch = copy_event->note()->note();
+			uint8_t new_pitch      = original_pitch + dnote - highest_note_difference;
+
 
 			if (new_time < Temporal::Beats()) {
 				continue;
 			}
 
+			int conformed_pitch = key->conform_midi_note (new_pitch, mt->key_enforcement_policy());
+
+			if (conformed_pitch < 0) {
+				continue;
+			}
+
+			new_pitch = (conformed_pitch & 0xf7);
+
 			copy_event->note()->set_time (new_time);
 			last_note_off = std::max (last_note_off, copy_event->note()->end_time());
 
 			/* update pitch */
-
-			uint8_t original_pitch = copy_event->note()->note();
-			uint8_t new_pitch      = original_pitch + dnote - highest_note_difference;
 
 			copy_event->note()->set_note (new_pitch);
 
@@ -3463,7 +3495,7 @@ MidiView::note_dropped (NoteBase *, timecnt_t const & d_qn, int8_t dnote, bool c
 
 	if (_midi_region) {
 		Temporal::Beats lno (_midi_region->source_beats_to_absolute_time (last_note_off).beats());
-		if (lno > _midi_region->end().beats()) {
+		if (lno > _midi_region->end_position().beats()) {
 			if (_midi_region->playlist()) {
 				_midi_region->playlist()->clear_owned_changes ();
 			}
@@ -3560,7 +3592,7 @@ MidiView::get_end_position_pixels()
 	if (!_midi_region) {
 		return 0.;
 	}
-	return _editing_context.time_to_pixel (_midi_region->end());
+	return _editing_context.time_to_pixel (_midi_region->end_position());
 }
 
 void
@@ -4221,7 +4253,7 @@ MidiView::_duplicate_notes (int times)
 
 	if (_midi_region) {
 		Temporal::Beats lno (_midi_region->source_beats_to_absolute_time (last_note_time + delta).beats());
-		if (lno > _midi_region->end().beats()) {
+		if (lno > _midi_region->end_position().beats()) {
 			apply_note_diff (true, true);
 			_midi_region->playlist()->clear_owned_changes ();
 			_midi_region->trim_end (timepos_t (lno));
@@ -4501,14 +4533,14 @@ MidiView::sysex_left (SysEx *)
 }
 
 void
-MidiView::note_mouse_position (float x_fraction, float /*y_fraction*/, bool can_set_cursor)
+MidiView::note_mouse_position (float /*x_fraction*/, float /*y_fraction*/, bool can_set_cursor)
 {
-	bool trimmable = _editing_context.allow_trim_cursors ();
+	bool trimmable = _editing_context.allow_trim_cursors () && _entered_note && _entered_note->big_enough_to_trim ();
 
 	if (can_set_cursor) {
-		if (trimmable && x_fraction > 0.0 && x_fraction < 0.2) {
+		if (trimmable && _entered_note->mouse_near_start ()) {
 			_editing_context.set_canvas_cursor (_editing_context.cursors()->left_side_trim);
-		} else if (trimmable && x_fraction >= 0.8 && x_fraction < 1.0) {
+		} else if (trimmable && _entered_note->mouse_near_end ()) {
 			_editing_context.set_canvas_cursor (_editing_context.cursors()->right_side_trim);
 		} else {
 			_editing_context.set_canvas_cursor (_editing_context.cursors()->grabber_note);

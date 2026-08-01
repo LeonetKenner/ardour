@@ -105,12 +105,13 @@ UIConfiguration::build_metadata ()
 	VAR_META (X_("use-double-click-to-zoom-to-selection"), _("editor"), _("zoom"), _("selection"), _("mouse"), _("click"),  NULL);
 	VAR_META (X_("use-mouse-position-as-zoom-focus-on-scroll"), _("editor"), _("zoom"), _("selection"), _("mouse"), _("wheel"), _("focus"), _("scroll"),  NULL);
 	VAR_META (X_("use-note-bars-for-velocity"), _("midi"), _("velocity"), _("bars"), _("box"),  NULL);
-	VAR_META (X_("use-note-color-for-velocity"), _("midi"), _("velocity"), _("color"),  NULL);
+	VAR_META (X_("default-midi-note-color-mode"), _("midi"), _("velocity"), _("colors"), _("pitches"), _("channels"),  NULL);
 	VAR_META (X_("use-route-color-widely"), _("mixer"), _("colors"), _("faders"),  NULL);
 	VAR_META (X_("use-time-rulers-to-zoom-with-vertical-drag"), _("zoom"), _("drag"), _("mouse"),  NULL);
 	VAR_META (X_("use-tooltips"), _("tooltips"), _("help"), _("popup"), _("information"),  NULL);
 	VAR_META (X_("use-wm-visibility"), _("quirks"), _("visibility"), _("switch"), _("windows"),  NULL);
 	VAR_META (X_("vertical-region-gap"), _("visual"), _("gap"), _("tracks"), _("spacing"),  NULL);
+	VAR_META (X_("vertical-summary-uses-track-colors"), _("summary"), _("scrollbar"), _("tracks"), _("colors"),  NULL);
 	VAR_META (X_("vkeybd-layout"), _("virtual"), _("keyboard"), _("layout"), _("qwerty"), _("midi"),  NULL);
 	VAR_META (X_("waveform-cache-size"), _("memory"), _("cache"), _("performance"), _("optimization"), _("image"),  NULL);
 	VAR_META (X_("waveform-clip-level"), _("clip"), _("level"), _("dbfs"), _("waveform"), _("peaking"),  NULL);
@@ -119,6 +120,7 @@ UIConfiguration::build_metadata ()
 	VAR_META (X_("waveform-shape"), _("waveform"), _("rectified"), _("half"), _("shape"), _("display"),  NULL);
 	VAR_META (X_("widget-prelight"), _("highlight"), _("mouse"), _("prelight"), _("hover"), _("indicate"),  NULL);
 	VAR_META (X_("drag-sensitivity"), _("drag"), _("sensitivity"), _("sensitive"), _("move"), _("threshold"),  NULL);
+	VAR_META (X_("region-edit-disposition"), _("region"), _("edit"), _("editing"), _("window"), _("windows"), _("pianoroll"), _("editor"), _("pane"), _("bottom"), _("lower"),  NULL);
 	VAR_META (X_("auto-play"), _("transport"), _("autoplay"), _("automatically"), _("play"),  NULL);
 	VAR_META (X_("auto-return"), _("transport"), _("autoreturn"), _("automatically"), _("return"), _("go"), _("back"),  NULL);
 	VAR_META (X_("count-in"), _("transport"), _("count"), _("in"), _("count-in"),  NULL);
@@ -144,6 +146,7 @@ UIConfiguration::build_metadata ()
 	VAR_META (X_("show-region-fades"), _("region"), _("gain"), _("fades"), _("show"), _("hide"), _("fadein"), _("fadeout"),  NULL);
 	VAR_META (X_("show-solo-on-meterbridge"), _("solo"), _("meterbridge"),  NULL);
 	VAR_META (X_("show-summary"), _("summary"), _("show"),  NULL);
+	VAR_META (X_("show-vertical-summary"), _("vertical"), _("summary"), _("show"),  NULL);
 	VAR_META (X_("slave-timecode-offset"), _("timecode"), _("synchronization"), _("offset"),  NULL);
 	VAR_META (X_("subframes-per-frame"), _("timecode"), _("subframes"), _("sync"),  NULL);
 	VAR_META (X_("take-name"), _("take"), _("names"),  NULL);

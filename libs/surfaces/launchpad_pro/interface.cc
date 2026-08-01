@@ -30,7 +30,7 @@ using namespace PBD;
 using namespace ArdourSurface;
 
 static ControlProtocol*
-new_lppro (Session* s)
+new_lppro (Session* s, std::string const & config)
 {
 	LaunchPadPro * p2 = 0;
 
@@ -39,7 +39,7 @@ new_lppro (Session* s)
 		/* do not set active here - wait for set_state() */
 	}
 	catch (std::exception & e) {
-		error << "Error instantiating LaunchPad Pro support: " << e.what() << endmsg;
+		error << "Error instantiating Launchpad Pro support: " << e.what() << endmsg;
 		delete p2;
 		p2 = 0;
 	}
@@ -56,7 +56,7 @@ delete_lppro (ControlProtocol* cp)
 	}
 	catch ( std::exception & e )
 	{
-		std::cout << "Exception caught trying to finalize LaunchPad Pro support: " << e.what() << std::endl;
+		std::cout << "Exception caught trying to finalize Launchpad Pro support: " << e.what() << std::endl;
 	}
 }
 
@@ -67,9 +67,14 @@ probe_lppro_midi_protocol ()
 	return LaunchPadPro::probe (i, o);
 }
 
+static std::map<std::string, std::vector<std::string>>
+enumerate_lppro ()
+{
+	return {{"Novation", {"Launchpad Pro"}}};
+}
 
 static ControlProtocolDescriptor lppro_descriptor = {
-	/* name       */ "Novation LaunchPad Pro",
+	/* name       */ "Novation Launchpad Pro",
 	/* id         */ "uri://ardour.org/surfaces/lppro:0",
 	/* module     */ 0,
 	/* available  */ LaunchPadPro::available,
@@ -77,6 +82,7 @@ static ControlProtocolDescriptor lppro_descriptor = {
 	/* match usb  */ 0, // LaunchPadPro::match_usb,
 	/* initialize */ new_lppro,
 	/* destroy    */ delete_lppro,
+	/* enumerate  */ enumerate_lppro,
 };
 
 extern "C" ARDOURSURFACE_API ControlProtocolDescriptor* protocol_descriptor () { return &lppro_descriptor; }

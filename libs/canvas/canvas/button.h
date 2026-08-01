@@ -53,19 +53,20 @@ public:
 	void set_highlight (bool);
 	Duple size () const;
 
+	void set_padding (double p);
+
   private:
 	double width;
 	double height;
-	double margin;
+	double padding;
 	Text* _label;
 	bool prelight;
 	bool highlight;
-	bool clicking;
 	Gtkmm2ext::HSV color;
 
 	bool event_handler (GdkEvent*);
 	void init ();
+	void update_size();
 };
 
 }
-

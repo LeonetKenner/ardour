@@ -164,7 +164,7 @@ ControlProtocolManager::set_session (Session* s)
 
 	for (auto const& p : _control_protocol_info) {
 		if (p->requested) {
-			(void)activate (*p);
+			(void)activate (*p, p->config);
 		}
 	}
 
@@ -204,7 +204,7 @@ ControlProtocolManager::set_session (Session* s)
 }
 
 int
-ControlProtocolManager::activate (ControlProtocolInfo& cpi)
+ControlProtocolManager::activate (ControlProtocolInfo& cpi, std::string const & config)
 {
 	PBD::RWLock::WriterLock lm (_protocols_lock);
 	ControlProtocol*        cp;
@@ -215,7 +215,7 @@ ControlProtocolManager::activate (ControlProtocolInfo& cpi)
 
 	cpi.requested = true;
 
-	if ((cp = instantiate (cpi)) == 0) {
+	if ((cp = instantiate (cpi, config)) == 0) {
 		return -1;
 	}
 
@@ -289,7 +289,7 @@ ControlProtocolManager::drop_protocols ()
 }
 
 ControlProtocol*
-ControlProtocolManager::instantiate (ControlProtocolInfo& cpi)
+ControlProtocolManager::instantiate (ControlProtocolInfo& cpi, std::string const & config)
 {
 	/* CALLER MUST HOLD LOCK */
 
@@ -301,7 +301,7 @@ ControlProtocolManager::instantiate (ControlProtocolInfo& cpi)
 		cpi.descriptor = get_descriptor (cpi.path);
 	}
 
-	DEBUG_TRACE (DEBUG::ControlProtocols, string_compose ("instantiating %1\n", cpi.name));
+	DEBUG_TRACE (DEBUG::ControlProtocols, string_compose ("instantiating %1 as [%2]\n", cpi.name, config));
 
 	if (cpi.descriptor == 0) {
 		error << string_compose (_("control protocol name \"%1\" has no descriptor"), cpi.name) << endmsg;
@@ -310,8 +310,11 @@ ControlProtocolManager::instantiate (ControlProtocolInfo& cpi)
 
 	DEBUG_TRACE (DEBUG::ControlProtocols, string_compose ("initializing %1\n", cpi.name));
 
-	if ((cpi.protocol = cpi.descriptor->initialize (_session)) == 0) {
+	cpi.config = config;
+
+	if ((cpi.protocol = cpi.descriptor->initialize (_session, config)) == 0) {
 		error << string_compose (_("control protocol name \"%1\" could not be initialized"), cpi.name) << endmsg;
+		cpi.config = string();
 		return 0;
 	}
 
@@ -465,6 +468,7 @@ ControlProtocolManager::control_protocol_discover (string path)
 			cpi->requested  = false;
 			cpi->automatic  = false;
 			cpi->state      = 0;
+			cpi->config     = {};
 
 			_control_protocol_info.push_back (cpi);
 
@@ -544,8 +548,10 @@ ControlProtocolManager::set_state (const XMLNode& node, int session_specific_sta
 		if (child->name () == X_("Protocol")) {
 			bool        active;
 			std::string name;
+			std::string config;
 			if (!child->get_property (X_("active"), active) ||
-			    !child->get_property (X_("name"), name)) {
+			    !child->get_property (X_("name"), name) ||
+			    !child->get_property (X_("config"), config)) {
 				continue;
 			}
 
@@ -558,8 +564,9 @@ ControlProtocolManager::set_state (const XMLNode& node, int session_specific_sta
 					delete cpi->state;
 					cpi->state = new XMLNode (**citer);
 					cpi->state->set_property (X_("session-state"), session_specific_state ? true : false);
+					cpi->config = config;
 					if (_session) {
-						instantiate (*cpi);
+						instantiate (*cpi, config);
 					} else {
 						cpi->requested = true;
 					}
@@ -593,6 +600,7 @@ ControlProtocolManager::get_state () const
 		if (p->protocol) {
 			XMLNode& child_state (p->protocol->get_state ());
 			child_state.set_property (X_("active"), !p->automatic);
+			child_state.set_property (X_("config"), p->config);
 			delete (p->state);
 			p->state = new XMLNode (child_state);
 			root->add_child_nocopy (child_state);
@@ -651,7 +659,18 @@ ControlProtocolManager::probe_midi_control_protocols ()
 
 		if (!active && found) {
 			cpi->automatic = true;
-			activate (*cpi);
+
+			string device_config;
+
+			if (cpi->config.empty()) {
+				auto en = cpi->descriptor->enumerate ();
+				if (!en.empty()) {
+					if (!en.begin()->second.empty()) {
+						device_config = en.begin()->second.front();
+					}
+				}
+			}
+			activate (*cpi, device_config);
 		} else if (active && cpi->automatic && !found) {
 			cpi->automatic = false;
 			deactivate (*cpi);
@@ -683,7 +702,7 @@ ControlProtocolManager::probe_usb_control_protocols (bool arrived, uint16_t vend
 
 		if (!active && arrived) {
 			cpi->automatic = true;
-			activate (*cpi);
+			activate (*cpi, {});
 		} else if (active && cpi->automatic && !arrived) {
 			cpi->automatic = false;
 			deactivate (*cpi);

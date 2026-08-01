@@ -398,6 +398,7 @@ children = [
         'share/patchfiles',
         'share/plugin_metadata',
         'share/scripts',
+        'share/us2400',
         'share/web_surfaces',
         # frontends
         'gtk2_ardour',
@@ -1271,6 +1272,15 @@ int main () { return 0; }
         #    conf.define('USE_PTW32_SEMAPHORE', 1)
         #    conf.env.append_value('CFLAGS', '-DUSE_PTW32_SEMAPHORE')
         #    conf.env.append_value('CXXFLAGS', '-DUSE_PTW32_SEMAPHORE')
+
+        # Check if GCC was built with native TLS support
+        # gcc -v prints configure flags to stderr, not stdout
+        gcc_config = subprocess.run([str(conf.env['CC'][0]), '-v'], capture_output=True, text=True).stderr
+        have_native_tls = '--enable-tls' in gcc_config
+
+        if have_native_tls:
+            conf.env.append_value('CFLAGS', '-DMINGW_NATIVE_TLS')
+            conf.env.append_value('CXXFLAGS', '-DMINGW_NATIVE_TLS')
 
     if Options.options.dist_target == 'msvc':
         conf.env.append_value('CFLAGS', '-DPLATFORM_WINDOWS')

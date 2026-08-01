@@ -101,6 +101,16 @@ VST3Plugin::init ()
 	_plug->OnResizeView.connect_same_thread (_connections, std::bind (&VST3Plugin::forward_resize_view, this, _1, _2));
 	_plug->OnParameterChange.connect_same_thread (_connections, std::bind (&VST3Plugin::parameter_change_handler, this, _1, _2, _3));
 	_plug->OnProcessorChange.connect_same_thread (_connections, [&](ARDOUR::RouteProcessorChange const& rpc) { Plugin::send_processors_changed (rpc); });
+
+	/* enable all Audio I/Os of the first bus (w/o aux) by default */
+	_connected_inputs.clear ();
+	_connected_outputs.clear ();
+	_connected_inputs.resize (_plug->n_audio_inputs (false));
+	_connected_outputs.resize (_plug->n_audio_outputs (false));
+	_connected_inputs.flip ();
+	_connected_outputs.flip ();
+	_connected_inputs.resize (_plug->n_audio_inputs ());
+	_connected_outputs.resize (_plug->n_audio_outputs ());
 }
 
 void
@@ -1345,7 +1355,11 @@ VST3PI::VST3PI (std::shared_ptr<ARDOUR::VST3PluginModule> m, std::string unique_
 	int32 n_params = _controller->getParameterCount ();
 	DEBUG_TRACE (DEBUG::VST3Config, string_compose ("VST3 parameter count: %1\n", n_params));
 
+#if defined(PLATFORM_WINDOWS) && defined(COMPILER_MINGW)
+	Glib::RefPtr<Glib::Regex> dpf_midi_CC = Glib::Regex::create ("MIDI Ch\\. [0-9]+ CC [0-9]+");
+#else
 	std::regex dpf_midi_CC ("MIDI Ch\\. [0-9]+ CC [0-9]+");
+#endif
 
 	for (int32 i = 0; i < n_params; ++i) {
 		Vst::ParameterInfo pi;
@@ -1360,7 +1374,12 @@ VST3PI::VST3PI (std::shared_ptr<ARDOUR::VST3PluginModule> m, std::string unique_
 			/* Some JUCE plugins add 16 * 128 automatable MIDI CC parameters */
 			continue;
 		}
-		if (std::regex_search (tchar_to_utf8 (pi.title), dpf_midi_CC)) {
+#if defined(PLATFORM_WINDOWS) && defined(COMPILER_MINGW)
+		if (dpf_midi_CC->match (tchar_to_ustring (pi.title)))
+#else
+		if (std::regex_search (tchar_to_utf8 (pi.title), dpf_midi_CC))
+#endif
+		{
 			/* DPF plugins also adds automatable MIDI CC parameters "MIDI Ch. %d CC %d" */
 			continue;
 		}
@@ -2429,8 +2448,8 @@ VST3PI::enable_io (std::vector<bool> const& ins, std::vector<bool> const& outs, 
 	/* check that settings have not changed */
 	assert (_n_bus_in == _component->getBusCount (Vst::kAudio, Vst::kInput));
 	assert (_n_bus_out == _component->getBusCount (Vst::kAudio, Vst::kOutput));
-	assert (_bus_info_in.size () == _n_bus_in);
-	assert (_bus_info_out.size () == _n_bus_out);
+	assert (_bus_info_in.size () == static_cast<size_t>(_n_bus_in));
+	assert (_bus_info_out.size () == static_cast<size_t>(_n_bus_out));
 
 	DEBUG_TRACE (DEBUG::VST3Config, string_compose ("VST3PI::enable_io: n_bus_in = %1 n_bus_out = %2\n", _n_bus_in, _n_bus_out));
 

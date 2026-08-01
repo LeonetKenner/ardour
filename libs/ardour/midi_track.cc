@@ -467,6 +467,7 @@ MidiTrack::non_realtime_locate (samplepos_t spos)
 	}
 
 	if (_chase_notes && Config->get_midi_chase()) {
+		/* Get the locate tracker up to date for this position */
 		_disk_reader->midi_chase (spos);
 	}
 
@@ -478,10 +479,10 @@ MidiTrack::non_realtime_locate (samplepos_t spos)
 	/* Update track controllers based on its "automation". */
 	const timepos_t pos_beats = timepos_t (region->source_position().distance (pos).beats ()); /* relative to source start */
 
-	for (Controls::const_iterator c = _controls.begin(); c != _controls.end(); ++c) {
+	for (auto const & [parameter,control] : _controls) {
 
-		std::shared_ptr<AutomationControl> ac = std::dynamic_pointer_cast<AutomationControl> (c->second);
-		std::shared_ptr<MidiTrack::MidiControl> tcontrol (std::dynamic_pointer_cast<MidiTrack::MidiControl>(c->second));
+		std::shared_ptr<MidiTrack::MidiControl> midi_control (std::dynamic_pointer_cast<MidiTrack::MidiControl>(control));
+		std::shared_ptr<AutomationControl> ac = std::dynamic_pointer_cast<AutomationControl> (control);
 
 		/* MidiTrack::MidiControl has no automation list, which will
 		 * make AutomationControl::automation_playback() always return
@@ -494,15 +495,18 @@ MidiTrack::non_realtime_locate (samplepos_t spos)
 		 * it. Otherwise, proceed.
 		 */
 
-		if (!tcontrol && !ac->automation_playback()) {
+		if (!midi_control && !ac->automation_playback()) {
 			continue;
 		}
 
 		std::shared_ptr<Evoral::Control> rcontrol;
 
-		if (tcontrol && (rcontrol = region->control (tcontrol->parameter()))) {
+		if (midi_control && (rcontrol = region->control (midi_control->parameter()))) {
 			if (rcontrol->list()->size() > 0) {
-				tcontrol->set_value(rcontrol->list()->eval(pos_beats), Controllable::NoGroup);
+				/* this both sets the AutomationControl value
+				 * and* sends a MIDI message.
+				 */
+				midi_control->set_value (rcontrol->list()->eval (pos_beats), Controllable::NoGroup);
 			}
 		}
 	}
@@ -922,6 +926,7 @@ MidiTrack::map_input_active (bool yn)
 		if (yn != mp->input_active()) {
 			mp->set_input_active (yn);
 		}
+		mp->set_scale_provider (this);
 	}
 }
 
@@ -1014,7 +1019,22 @@ MidiTrack::realtime_handle_transport_stopped ()
 {
 	Route::realtime_handle_transport_stopped ();
 	_disk_reader->resolve_tracker (_immediate_events, 0);
-	_disk_reader->resolve_tracker (_user_immediate_events, 0);
+
+	for (uint8_t channel = 0; channel <= 0xF; channel++) {
+
+		uint8_t ev[3] = { ((uint8_t) (MIDI_CMD_CONTROL | channel)), MIDI_CTL_SUSTAIN, 0 };
+
+		/* we need to send all notes off AND turn the
+		 * sustain/damper pedal off to handle synths
+		 * that prioritize sustain over AllNotesOff
+		 */
+
+		_immediate_events.write (0, Evoral::MIDI_EVENT, 3, ev);
+
+		ev[1] = MIDI_CTL_ALL_NOTES_OFF;
+
+		_immediate_events.write (0, Evoral::MIDI_EVENT, 3, ev);
+	}
 }
 
 void

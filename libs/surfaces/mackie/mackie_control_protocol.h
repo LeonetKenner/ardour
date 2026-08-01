@@ -104,13 +104,14 @@ class MackieControlProtocol
 		Zero,   /* fader controls primary, but doesn't move, vpot controls secondary */
 	};
 
-	MackieControlProtocol(ARDOUR::Session &, const char* name);
+	MackieControlProtocol(ARDOUR::Session &, std::string const & config);
 	virtual ~MackieControlProtocol();
 
 	static MackieControlProtocol* instance() { return _instance; }
 
 	MACKIE_NAMESPACE::DeviceInfo& device_info() { return _device_info; }
 	MACKIE_NAMESPACE::DeviceProfile& device_profile() { return _device_profile; }
+	static std::map<std::string, std::vector<std::string>> enumerate();
 
 	PBD::Signal<void()> DeviceChanged;
 	PBD::Signal<void(std::shared_ptr<MACKIE_NAMESPACE::Surface> )> ConnectionChange;

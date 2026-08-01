@@ -440,7 +440,7 @@ Editor::register_actions ()
 	ActionManager::time_selection_sensitive_actions.push_back (act);
 
 	toggle_reg_sens (editor_actions, "toggle-log-window", _("Log"),
-			sigc::mem_fun (ARDOUR_UI::instance(), &ARDOUR_UI::toggle_errors));
+			sigc::mem_fun (*ARDOUR_UI::instance(), &ARDOUR_UI::toggle_errors));
 
 	reg_sens (editor_actions, "alternate-tab-to-transient-forwards", _("Move to Next Transient"), sigc::bind (sigc::mem_fun(*this, &Editor::tab_to_transient), true));
 	reg_sens (editor_actions, "alternate-tab-to-transient-backwards", _("Move to Previous Transient"), sigc::bind (sigc::mem_fun(*this, &Editor::tab_to_transient), false));
@@ -670,6 +670,8 @@ Editor::register_actions ()
 	ActionManager::write_sensitive_actions.push_back (act);
 
 	ActionManager::register_toggle_action (editor_actions, X_("ToggleSummary"), _("Show Summary"), sigc::mem_fun (*this, &Editor::set_summary));
+
+	ActionManager::register_toggle_action (editor_actions, X_("ToggleVerticalSummary"), _("Show Vertical Summary"), sigc::mem_fun (*this, &Editor::set_vsummary));
 
 	ActionManager::register_toggle_action (editor_actions, X_("ToggleGroupTabs"), _("Show Group Tabs"), sigc::mem_fun (*this, &Editor::set_group_tabs));
 
@@ -951,6 +953,13 @@ Editor::set_summary ()
 {
 	Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action (X_("Editor"), X_("ToggleSummary"));
 	_session->config.set_show_summary (tact->get_active ());
+}
+
+void
+Editor::set_vsummary ()
+{
+	Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action (X_("Editor"), X_("ToggleVerticalSummary"));
+	_session->config.set_show_vsummary (tact->get_active ());
 }
 
 void
@@ -1237,6 +1246,19 @@ Editor::parameter_changed (std::string p)
 		if (tact->get_active () != s) {
 			tact->set_active (s);
 		}
+	} else if (p == "show-vertical-summary") {
+
+	   bool const s = _session->config.get_show_vsummary ();
+	   if (s) {
+		   _vsummary_frame.show ();
+	   } else {
+		   _vsummary_frame.hide ();
+	   }
+
+	   Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action (X_("Editor"), X_("ToggleVerticalSummary"));
+	   if (tact->get_active () != s) {
+		   tact->set_active (s);
+	   }
 	} else if (p == "show-group-tabs") {
 
 		bool const s = _session ? _session->config.get_show_group_tabs () : true;
@@ -1260,8 +1282,6 @@ Editor::parameter_changed (std::string p)
 		if (tact->get_active () != s) {
 			tact->set_active (s);
 		}
-	} else if (p == "show-region-gain") {
-		set_gain_envelope_visibility ();
 	} else if (p == "skip-playback") {
 		Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action (X_("Editor"), X_("toggle-skip-playback"));
 		bool s = Config->get_skip_playback ();

@@ -220,13 +220,13 @@ DiskReader::midi_chase (samplepos_t spos)
 		return;
 	}
 
-	_locate_tracker.reset ();
+	clear_midi_chase ();
 
 	if (rtmb) {
 		for (size_t n = 0; n < rtmb->size(); ++n) {
 			uint32_t sz;
 			RTMidiBuffer::Item const & item ((*rtmb)[n]);
-			if (item.timestamp > spos) {
+			if (item.timestamp >= spos) {
 				break;
 			}
 			uint8_t const * buf = rtmb->bytes (item, sz);

@@ -103,6 +103,7 @@
 #include "ardour/directory_names.h"
 #include "ardour/disk_reader.h"
 #include "ardour/filename_extensions.h"
+#include "ardour/filesystem_paths.h"
 #include "ardour/graph.h"
 #include "ardour/io_plug.h"
 #include "ardour/location.h"
@@ -334,6 +335,8 @@ Session::post_engine_init ()
 		 */
 
 		ControlProtocolManager::instance().set_session (this);
+
+		_butler->delegate (std::bind (&Session::probe_ctrl_surfaces, this));
 
 		/* This must be done after the ControlProtocolManager set_session above,
 		   as it will set states for ports which the ControlProtocolManager creates.
@@ -950,6 +953,10 @@ Session::save_state (string snapshot_name, bool pending, bool switch_to_snapshot
 		remove_pending_capture_state ();
 	}
 
+	if (!pending && !for_archive && ! template_only) {
+		save_misc_port_state ();
+	}
+
 	return 0;
 }
 
@@ -1110,11 +1117,80 @@ Session::get_template ()
 	return state (true, NormalSave);
 }
 
+bool
+Session::load_misc_port_state ()
+{
+	const std::string rcfile = Glib::build_filename (user_config_directory(), "session_port.rc");
+
+	if (!Glib::file_test (rcfile, Glib::FILE_TEST_EXISTS)) {
+		return false;
+	}
+
+	XMLTree tree;
+	if (!tree.read (rcfile)) {
+		return false;
+	}
+
+	if (tree.root()->name() != X_("SessionPorts")) {
+		return false;
+	}
+
+	delete _misc_port_state;
+	_misc_port_state = new XMLNode (*tree.root());
+
+	return true;
+}
+
+bool
+Session::save_misc_port_state () const
+{
+	const std::string rcfile = Glib::build_filename (user_config_directory(), "session_port.rc");
+	XMLTree tree;
+	XMLNode* root = _misc_port_state ? _misc_port_state : new XMLNode(X_("SessionPorts"));
+
+	if (_click_io) {
+		root->remove_nodes ("Click");
+		XMLNode* node = root->add_child ("Click");
+		node->add_child_nocopy (_click_io->get_state ());
+		node->add_child_nocopy (_click_gain->get_state ());
+	}
+
+	if (auditioner) {
+		auditioner->update_misc_port_state (*root);
+	}
+
+	if (_ltc_output_port) {
+		root->remove_nodes ("LTC");
+		XMLNode* node = root->add_child ("LTC");
+		node->add_child_nocopy (_ltc_output_port->get_state ());
+	}
+
+	tree.set_root (root);
+	bool ok = tree.write (rcfile.c_str());
+
+	if (!ok) {
+		error << string_compose (_("port connections could not be saved to %1"), rcfile) << endmsg;
+	}
+
+	/* retain _misc_port_state */
+	tree.set_root (0);
+
+	return ok;
+}
+
 typedef std::set<std::shared_ptr<Source> > SourceSet;
 
 bool
 Session::export_route_state (std::shared_ptr<RouteList> rl, const string& path, bool with_sources)
 {
+	if (actively_recording ()) {
+		/* on windows soruce files are closed for copy, and there may or may not
+		 * be the occassional Process Lock for plugin state save.
+		 */
+		error << _("Cannot export state while recording") << endmsg;
+		return false;
+	}
+
 	if (Glib::file_test (path, Glib::FILE_TEST_EXISTS))  {
 		remove_directory (path);
 	}
@@ -1406,7 +1482,9 @@ Session::import_route_state (const string& path, std::map<PBD::ID, PBD::ID> cons
 				}
 
 				if (r) {
-					r->import_state (*rxml, from_this_session);
+					PBD::ID id;
+					rxml->get_property ("id", id);
+					r->import_state (*rxml, from_this_session && id == r->id());
 				} else if (allow_import_route_state (*rxml, version)) {
 					/* invalid ID (e.g. 0, -1 (int64_t max) -> new track */
 					if (pi.flags () & special_pi) {
@@ -1862,12 +1940,6 @@ Session::state (bool save_template, snapshot_t snapshot_type, bool for_archive, 
 	child = node->add_child ("RouteGroups");
 	for (auto const & rg : _route_groups) {
 		child->add_child_nocopy (rg->get_state());
-	}
-
-	if (_click_io) {
-		XMLNode* gain_child = node->add_child ("Click");
-		gain_child->add_child_nocopy (_click_io->get_state ());
-		gain_child->add_child_nocopy (_click_gain->get_state ());
 	}
 
 	node->add_child_nocopy (_speakers->get_state());
@@ -2385,11 +2457,15 @@ Session::set_state (const XMLNode& node, int version)
 		}
 	}
 
-	if ((child = find_named_node (node, "Click")) == 0) {
+#if 0
+	if (_misc_port_state)  {
+		/* already done in Session::immediately_post_engine */
+	} else if ((child = find_named_node (node, "Click")) == 0) {
 		warning << _("Session: XML state has no 'Click' section") << endmsg;
 	} else if (_click_io) {
 		setup_click_state (&node);
 	}
+#endif
 
 	if ((child = find_named_node (node, ControlProtocolManager::state_node_name)) != 0) {
 		ControlProtocolManager::instance().set_state (*child, 1 /* here: session-specific state */);
@@ -3977,6 +4053,11 @@ Session::close_all_sources ()
 int
 Session::cleanup_sources (CleanupReport& rep)
 {
+	if (actively_recording ()) {
+		error << _("Cannot clean up session while recording") << endmsg;
+		return -1;
+	}
+
 	// FIXME: needs adaptation to midi
 
 	std::set<std::shared_ptr<Source> > dead_sources;
@@ -4811,8 +4892,6 @@ Session::config_changed (std::string p, bool ours)
 		_solo_cut_control->Changed (true, Controllable::NoGroup);
 	} else if (p == "timecode-offset" || p == "timecode-offset-negative") {
 		last_timecode_valid = false;
-	} else if (p == "ltc-sink-port") {
-		reconnect_ltc_output ();
 	} else if (p == "timecode-generator-offset") {
 		ltc_tx_parse_offset();
 	} else if (p == "auto-return-target-list") {
@@ -4914,7 +4993,7 @@ Session::setup_midi_machine_control ()
 	std::shared_ptr<AsyncMIDIPort> async_in = std::dynamic_pointer_cast<AsyncMIDIPort> (_midi_ports->mmc_input_port());
 	std::shared_ptr<AsyncMIDIPort> async_out = std::dynamic_pointer_cast<AsyncMIDIPort> (_midi_ports->mmc_output_port());
 
-	if (!async_out || !async_out) {
+	if (!async_in || !async_out) {
 		return;
 	}
 
@@ -4996,7 +5075,7 @@ Session::rename (const std::string& new_name)
 		error << _("Cannot rename read-only session.") << endmsg;
 		return 0; // don't show "messed up" warning
 	}
-	if (record_status() == Recording) {
+	if (actively_recording ()) {
 		error << _("Cannot rename session while recording") << endmsg;
 		return 0; // don't show "messed up" warning
 	}

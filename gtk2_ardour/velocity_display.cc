@@ -69,11 +69,6 @@ VelocityDisplay::VelocityDisplay (EditingContext& ec, MidiViewBackground& backgr
 {
 	base.set_data (X_("ghostregionview"), this);
 	base_connection = base.Event.connect (sigc::mem_fun (*this, &VelocityDisplay::base_event));
-	base.set_fill_color (UIConfiguration::instance().color_mod ("ghost track base", "ghost track midi fill"));
-	base.set_outline_color (UIConfiguration::instance().color ("automation track outline"));
-	base.set_outline (true);
-	/* XXX this is likely wrong for the pianoroll case */
-	base.set_outline_what (ArdourCanvas::Rectangle::What (ArdourCanvas::Rectangle::LEFT|ArdourCanvas::Rectangle::RIGHT));
 }
 
 VelocityDisplay::~VelocityDisplay ()
@@ -114,7 +109,13 @@ VelocityDisplay::line_extended (ArdourCanvas::Duple const & from, ArdourCanvas::
 {
 	std::vector<GhostEvent*> affected_lollis;
 
-	lollis_between (from.x, to.x, affected_lollis);
+	if (from.x < to.x) {
+		/* rightward, "later" motion */
+		lollis_between (from.x, to.x, affected_lollis);
+	} else {
+		/* leftward, "earlier" motion */
+		lollis_between (to.x, from.x, affected_lollis);
+	}
 
 	if (affected_lollis.empty()) {
 		return false;
@@ -255,6 +256,9 @@ void
 VelocityDisplay::set_colors ()
 {
 	base.set_fill_color (UIConfiguration::instance().color_mod ("ghost track base", "ghost track midi fill"));
+	base.set_outline_color (UIConfiguration::instance().color ("automation track outline"));
+	base.set_outline (true);
+	base.set_outline_what (ArdourCanvas::Rectangle::What (ArdourCanvas::Rectangle::LEFT|ArdourCanvas::Rectangle::RIGHT));
 
 	for (auto & gev : events) {
 		color_ghost_event (gev.second);

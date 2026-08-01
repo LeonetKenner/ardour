@@ -111,7 +111,6 @@ using namespace Editing;
 using namespace std;
 
 // Minimum height at which a control is displayed
-static const uint32_t MIDI_CONTROLS_BOX_MIN_HEIGHT = 160;
 static const uint32_t KEYBOARD_MIN_HEIGHT = 130;
 
 #define DEFAULT_MIDNAM_MODEL (X_("Generic"))
@@ -749,6 +748,16 @@ MidiTimeAxisView::append_extra_display_menu_items ()
 	items.push_back (MenuElem (_("Color Mode"), *build_color_mode_menu ()));
 
 	items.push_back (SeparatorElem ());
+}
+
+void
+MidiTimeAxisView::add_scale_related_menu_items (Gtk::Menu_Helpers::MenuList& items)
+{
+	using namespace Menu_Helpers;
+
+	if (midi_view()) {
+		items.push_back (MenuElem (_("Key Enforcement"), *(midi_view()->build_key_enforcement_menu())));
+	}
 }
 
 void
@@ -1548,7 +1557,7 @@ void
 MidiTimeAxisView::get_per_region_note_selection (list<pair<PBD::ID, set<std::shared_ptr<Evoral::Note<Temporal::Beats> > > > >& selection)
 {
 	_view->foreach_regionview (
-		sigc::bind (sigc::mem_fun (*this, &MidiTimeAxisView::get_per_region_note_selection_region_view), sigc::ref(selection)));
+		sigc::bind (sigc::mem_fun (*this, &MidiTimeAxisView::get_per_region_note_selection_region_view), std::ref(selection)));
 }
 
 void
@@ -1809,6 +1818,21 @@ MidiTimeAxisView::get_regions_with_selected_data (RegionSelection& rs)
 }
 
 void
+MidiTimeAxisView::route_property_changed (PBD::PropertyChange const & what_changed)
+{
+	RouteTimeAxisView::route_property_changed (what_changed);
+
+	PBD::PropertyChange our_interests;
+
+	our_interests.add (Properties::musical_mode);
+	our_interests.add (Properties::key_enforcement);
+
+	if (what_changed.contains (our_interests)) {
+		dynamic_cast<MidiStreamView*> (_view)->setup_note_lines ();
+	}
+}
+
+void
 MidiTimeAxisView::create_velocity_automation_child (Evoral::Parameter const &, bool show)
 {
 	std::shared_ptr<AutomationControl> c = midi_track()->velocity_control();
@@ -1859,4 +1883,3 @@ MidiTimeAxisView::exited ()
 	TimeAxisView::exited();
 	_editor.disable_midi_bindings ();
 }
-

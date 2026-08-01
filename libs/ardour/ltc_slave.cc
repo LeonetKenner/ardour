@@ -17,21 +17,16 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
-#include <iostream>
-#include <errno.h>
 #include <sys/types.h>
 
-#include "pbd/error.h"
 #include "pbd/failed_constructor.h"
 #include "pbd/pthread_utils.h"
 
 #include "ardour/debug.h"
 #include "ardour/dsp_filter.h"
-#include "ardour/profile.h"
 #include "ardour/transport_master.h"
 #include "ardour/session.h"
 #include "ardour/audioengine.h"
-#include "ardour/audio_port.h"
 
 #include "pbd/i18n.h"
 
@@ -54,6 +49,7 @@ LTC_TransportMaster::LTC_TransportMaster (std::string const & name)
 	, monotonic_cnt (0)
 	, frames_since_reset (0)
 	, delayedlocked (10)
+	, frame_age (0)
 	, ltc_detect_fps_cnt (0)
 	, ltc_detect_fps_max (0)
 	, sync_lock_broken (false)
@@ -420,6 +416,8 @@ LTC_TransportMaster::process_ltc(samplepos_t const now)
 	LTCFrameExt ltc_frame;
 	LTC_TV_STANDARD tv_standard = LTC_TV_625_50;
 
+	bool keep_rolling = Config->get_transport_masters_just_roll_when_sync_lost();
+
 	while (ltc_decoder_read (decoder, &ltc_frame)) {
 
 		SMPTETimecode stime;
@@ -432,18 +430,24 @@ LTC_TransportMaster::process_ltc(samplepos_t const now)
 
 		const bool ltc_is_stationary = equal_ltc_sample_time (&prev_frame.ltc, &ltc_frame.ltc);
 
-		if (detect_discontinuity (&ltc_frame, ceil(timecode.rate), !fps_detected)) {
+		if (ltc_is_stationary && fps_detected) {
+			if (frames_since_reset < 20) {
+				frames_since_reset++;
+			}
+		} else if (detect_discontinuity (&ltc_frame, ceil(timecode.rate), !fps_detected)) {
 			if (frames_since_reset > 1) {
 				reset (false);
 			}
-		} else {
-			if (fps_detected) {
+		} else if (fps_detected) {
+			/* prevent overvlow */
+			if (frames_since_reset < 20) {
 				frames_since_reset++;
-				DEBUG_TRACE (DEBUG::LTC, string_compose ("fsr %1\n", frames_since_reset));
 			}
 		}
 
-		if (!ltc_is_stationary && detect_ltc_fps (stime.frame, (ltc_frame.ltc.dfbit) ? true : false)) {
+		if (keep_rolling && fps_detected && _session && _session->actively_recording ()) {
+			/* keep recording with current framerate. */
+		} else if (!ltc_is_stationary && detect_ltc_fps (stime.frame, (ltc_frame.ltc.dfbit) ? true : false)) {
 			reset (true);
 			fps_detected = true;
 			timecode_format_valid = true; /* SET FLAG */
@@ -495,7 +499,9 @@ LTC_TransportMaster::process_ltc(samplepos_t const now)
 				break;
 		}
 
-		if (!ltc_frame.reverse) {
+		if (ltc_is_stationary) {
+			transport_direction = 0;
+		} else if (!ltc_frame.reverse) {
 			ltc_frame_increment(&ltc_frame.ltc, fps_i, tv_standard, 0);
 			ltc_frame_to_time(&stime, &ltc_frame.ltc, 0);
 			transport_direction = 1;
@@ -513,6 +519,8 @@ LTC_TransportMaster::process_ltc(samplepos_t const now)
 		timecode.minutes = stime.mins;
 		timecode.seconds = stime.secs;
 		timecode.frames  = stime.frame;
+
+		frame_age = ltc_frame.off_end;
 
 		samplepos_t ltc_sample; // audio-sample corresponding to position of LTC frame
 
@@ -541,7 +549,11 @@ LTC_TransportMaster::process_ltc(samplepos_t const now)
 		DEBUG_TRACE (DEBUG::LTC, string_compose ("LTC ltc-sample: %1 prev-ltc-sample %2  cur-timestamp: %3 last-timestamp: %4 frame-spans %5..%6\n", ltc_sample, current.position, cur_timestamp, current.timestamp, ltc_frame.off_start, ltc_frame.off_end));
 
 		if (cur_timestamp <= current.timestamp || current.timestamp == 0) {
+			// FIXME handle backwards playback!
 			DEBUG_TRACE (DEBUG::LTC, string_compose ("LTC speed: UNCHANGED: %1\n", current.speed));
+		} else if (transport_direction == 0) {
+			/* static timecode - no-roll/stop */
+			ltc_speed = 0;
 		} else {
 			ltc_speed = double (ltc_sample - current.position) / double (cur_timestamp - current.timestamp);
 
@@ -632,7 +644,11 @@ LTC_TransportMaster::pre_process (ARDOUR::pframes_t nframes, samplepos_t now, st
 		}
 	}
 
-	if (abs (now - current.timestamp) > FLYWHEEL_TIMEOUT) {
+	bool const keep_rolling = Config->get_transport_masters_just_roll_when_sync_lost();
+
+	if (keep_rolling && _session && _session->actively_recording ()) {
+		/* keep recording */
+	} else if (abs (now - current.timestamp) > FLYWHEEL_TIMEOUT) {
 		DEBUG_TRACE (DEBUG::LTC, "flywheel timeout\n");
 		reset(true);
 		/* don't change position from last known */
@@ -676,6 +692,17 @@ LTC_TransportMaster::apparent_timecode_format () const
 	} else {
 		return timecode_30;
 	}
+}
+
+bool
+LTC_TransportMaster::valid_position (std::string& tc, samplepos_t& when) const
+{
+	if (frame_age == 0) {
+		return false;
+	}
+	tc =  Timecode::timecode_format_time(timecode);
+	when = frame_age;
+	return true;
 }
 
 std::string

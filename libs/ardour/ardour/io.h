@@ -59,6 +59,7 @@ class PeakMeter;
 class Port;
 class Processor;
 class Session;
+class ScaleProvider;
 class UserBundle;
 
 /** A collection of ports (all input or all output) with connections.
@@ -154,6 +155,8 @@ public:
 	int set_state_2X (const XMLNode&, int, bool);
 	static void prepare_for_reset (XMLNode&, const std::string&);
 
+	void set_port_state (const XMLNode&, int version);
+
 	/* We'd like this to use bool, but there are unexplained issues using
 	 * bool with a PBD::StackAllocator. They may arise from stdlib's
 	 * specialiation of std::list<bool> and/or std::vector<bool>.
@@ -200,6 +203,8 @@ public:
 	/* AudioTrack::deprecated_use_diskstream_connections() needs these */
 
 	int set_ports (const std::string& str);
+
+	void set_scale_provider (ScaleProvider*);
 
 protected:
 	virtual XMLNode& state () const;

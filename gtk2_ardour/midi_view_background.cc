@@ -22,9 +22,15 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "ytkmm/menu.h"
+
 #include "canvas/debug.h"
 #include "canvas/rect_set.h"
 
+#include "ardour/midi_track.h"
+#include "ardour/scale.h"
+
+#include "gui_thread.h"
 #include "keyboard.h"
 #include "midi_view_background.h"
 #include "ui_config.h"
@@ -48,6 +54,7 @@ MidiViewBackground::MidiViewBackground (ArdourCanvas::Item* parent, EditingConte
 	, _color_mode (UIConfiguration::instance().get_default_midi_note_color_mode())
 	, _visibility_note_range (ContentsRange)
 	, note_range_set (false)
+	, kep_menu_hack (nullptr)
 {
 	CANVAS_DEBUG_NAME (_note_lines, "MVB note lines");
 	_note_lines->lower_to_bottom();
@@ -67,6 +74,7 @@ MidiViewBackground::MidiViewBackground (ArdourCanvas::Item* parent, EditingConte
 
 MidiViewBackground::~MidiViewBackground()
 {
+	delete kep_menu_hack;
 }
 
 void
@@ -160,11 +168,13 @@ void
 MidiViewBackground::setup_note_lines()
 {
 	if (updates_suspended()) {
+		std::cerr << "US\n";
 		return;
 	}
 
 	Gtkmm2ext::Color black = UIConfiguration::instance().color_mod ("piano roll black", "piano roll black");
 	Gtkmm2ext::Color white = UIConfiguration::instance().color_mod ("piano roll white", "piano roll white");
+	Gtkmm2ext::Color offkey = UIConfiguration::instance().color_mod ("piano roll offkey", "piano roll offkey");
 	Gtkmm2ext::Color divider = UIConfiguration::instance().color ("piano roll black outline");
 	Gtkmm2ext::Color color;
 
@@ -181,6 +191,9 @@ MidiViewBackground::setup_note_lines()
 
 	double h = note_height();
 	double y;
+	std::shared_ptr<ARDOUR::MidiTrack> mt (midi_track());
+	bool show_key = mt->key_enforcement_policy() & ARDOUR::ShowKey;
+	ARDOUR::MusicalKey const * key = mt->key();
 
 	for (int i = highest_note(); i >= lowest_note(); i--) {
 
@@ -199,7 +212,15 @@ MidiViewBackground::setup_note_lines()
 		case 6:
 		case 8:
 		case 10:
-			color = black;
+			if (show_key && key) {
+				if (key->in_key (i)) {
+					color = black;
+				} else {
+					color = offkey;
+				}
+			} else {
+				color = black;
+			}
 			break;
 		case 4:
 		case 11:
@@ -207,7 +228,15 @@ MidiViewBackground::setup_note_lines()
 			_note_lines->add_rect (i, ArdourCanvas::Rect (0., y, ArdourCanvas::COORD_MAX, y + 1.), divider);
 			/* fallthrough */
 		default:
-			color = white;
+			if (show_key && key) {
+				if (key->in_key (i)) {
+					color = white;
+				} else {
+					color = offkey;
+				}
+			} else {
+				color = white;
+			}
 			break;
 		}
 
@@ -225,15 +254,14 @@ void
 MidiViewBackground::set_note_visibility_range_style (VisibleNoteRange r)
 {
 	if (r == UserRange) {
-		_visibility_note_range = UserRange;
+		/* do nothing, _visibility_note_range is set in apply_note_range,
+		 * this avoids setting it to UserRange range when the actual range
+		 * is ContentsRange or FullRange
+		 */
 	} else if (r == ContentsRange) {
-		if (apply_note_range (_data_note_min, _data_note_max, true)) {
-			_visibility_note_range = ContentsRange;
-		}
+		apply_note_range (_data_note_min, _data_note_max, true);
 	} else {
-		if (apply_note_range (0, 127, true)) {
-			_visibility_note_range = FullRange;
-		}
+		apply_note_range (0, 127, true);
 	}
 }
 
@@ -275,9 +303,10 @@ MidiViewBackground::apply_note_range (uint8_t lowest, uint8_t highest, bool to_c
 	}
 
 	/* Apply maximum note height setting */
-	
+
 	bool extend_top = true;
-	while (contents_height() / (highest - lowest) > UIConfiguration::instance().get_max_note_height()) {
+	int max_note_height = UIConfiguration::instance().get_max_note_height() * UIConfiguration::instance().get_ui_scale();
+	while (contents_height() / (highest - lowest) > max_note_height) {
 		if (extend_top && highest < 127) {
 			highest++;
 		} else if (!extend_top && lowest > 0) {
@@ -294,6 +323,22 @@ MidiViewBackground::apply_note_range (uint8_t lowest, uint8_t highest, bool to_c
 	if (_lowest_note != lowest) {
 		changed = true;
 		_lowest_note = lowest;
+	}
+
+	if (_lowest_note == 0 && _highest_note == 127) {
+		_visibility_note_range = FullRange;
+	} else if (_lowest_note == _data_note_min && _highest_note == _data_note_max) {
+		_visibility_note_range = ContentsRange;
+	} else if ( _data_note_max - _data_note_min < 11 && _highest_note - _lowest_note == 11 &&
+	            _lowest_note <= _data_note_min && _highest_note >= _data_note_max )
+	{
+		/* if data range is smaller than one octave,
+		 * displaying ContentsRange is not strictly possible, but we want
+		 * to store ContentsRange because it's as close as it can get
+		 */
+		_visibility_note_range = ContentsRange;
+	} else {
+		_visibility_note_range = UserRange;
 	}
 
 	if (contents_height() == 0) {
@@ -417,5 +462,110 @@ MidiViewBackground::set_note_mode (ARDOUR::NoteMode nm)
 	if (_note_mode != nm) {
 		_note_mode = nm;
 		NoteModeChanged(); /* EMIT SIGNAL */
+	}
+}
+
+Gtk::Menu*
+MidiViewBackground::build_key_enforcement_menu ()
+{
+	using namespace Gtk;
+	using namespace Menu_Helpers;
+
+	Menu* menu = manage (new Menu);
+	MenuList& items = menu->items();
+	menu->set_name ("ArdourContextMenu");
+
+	RadioMenuItem::Group group;
+	Gtk::CheckMenuItem* last_check_item;
+	RadioMenuItem* last_radio_item;
+
+	ARDOUR::KeyEnforcementPolicy kep = midi_track()->key_enforcement_policy();
+
+	items.push_back (CheckMenuElem (_("Show notes-in-scale in MIDI backgrounds")));
+	last_check_item = dynamic_cast<Gtk::CheckMenuItem*>(&items.back());
+	last_check_item->set_active (kep & ARDOUR::ShowKey);
+	last_check_item->signal_toggled().connect (sigc::bind (sigc::mem_fun (*this, &MidiViewBackground::toggle_key_enforcement_policy), ARDOUR::ShowKey, last_check_item));
+
+	items.push_back (CheckMenuElem (_("Don't show non-scale ghost notes while drawing/editing")));
+	last_check_item = dynamic_cast<Gtk::CheckMenuItem*>(&items.back());
+	last_check_item->set_active (kep & ARDOUR::NoDraw);
+	last_check_item->signal_toggled().connect (sigc::bind (sigc::mem_fun (*this, &MidiViewBackground::toggle_key_enforcement_policy), ARDOUR::NoDraw, last_check_item));
+
+	items.push_back (CheckMenuElem (_("Don't allow mouse edits to create non-scale notes")));
+	last_check_item = dynamic_cast<Gtk::CheckMenuItem*>(&items.back());
+	last_check_item->set_active (kep & ARDOUR::NoInsert);
+	last_check_item->signal_toggled().connect (sigc::bind (sigc::mem_fun (*this, &MidiViewBackground::toggle_key_enforcement_policy), ARDOUR::NoInsert, last_check_item));
+
+	items.push_back (RadioMenuElem (group, _("No scale-based editing")));
+	last_radio_item = dynamic_cast<RadioMenuItem*>(&items.back());
+	last_radio_item->signal_toggled().connect (sigc::bind (sigc::mem_fun (*this, &MidiViewBackground::toggle_key_enforcement_policy), ARDOUR::KeyEnforcementPolicy (0), last_radio_item));
+	last_radio_item->set_active (true);
+
+	/* we just turned the "no scale based editing" button on; the remaining
+	 * setup may change that to reflect the actual setting.
+	 */
+
+	items.push_back (RadioMenuElem (group, _("Force note edits of non-scale notes to next lower note")));
+	last_radio_item = dynamic_cast<RadioMenuItem*>(&items.back());
+	last_radio_item->set_active (kep & ARDOUR::ForceLower);
+	last_radio_item->signal_toggled().connect (sigc::bind (sigc::mem_fun (*this, &MidiViewBackground::toggle_key_enforcement_policy), ARDOUR::ForceLower, last_radio_item));
+
+	items.push_back (RadioMenuElem (group, _("Force note edits of non-scale notes to next higher note")));
+	last_radio_item = dynamic_cast<RadioMenuItem*>(&items.back());
+	last_radio_item->set_active (kep & ARDOUR::ForceHigher);
+	last_radio_item->signal_toggled().connect (sigc::bind (sigc::mem_fun (*this, &MidiViewBackground::toggle_key_enforcement_policy), ARDOUR::ForceHigher, last_radio_item));
+
+	items.push_back (RadioMenuElem (group, _("Force note edits of non-scale notes to nearest note")));
+	last_radio_item = dynamic_cast<RadioMenuItem*>(&items.back());
+	last_radio_item->set_active (kep & ARDOUR::ForceNearest);
+	last_radio_item->signal_toggled().connect (sigc::bind (sigc::mem_fun (*this, &MidiViewBackground::toggle_key_enforcement_policy), ARDOUR::ForceNearest, last_radio_item));
+
+
+	return menu;
+}
+
+void
+MidiViewBackground::toggle_key_enforcement_policy (ARDOUR::KeyEnforcementPolicy kepb, Gtk::CheckMenuItem* item)
+{
+	ARDOUR::KeyEnforcementPolicy kep = midi_track()->key_enforcement_policy();
+
+	/* Some of the menu items that trigger this are radio menu items, and
+	   this method will be called when they go inactive. We want to ignore
+	   these calls.
+	*/
+
+	if (dynamic_cast<Gtk::RadioMenuItem*> (item) && !item->get_active()) {
+		return;
+	}
+
+	if (kep & kepb) {
+		midi_track()->set_key_enforcement_policy (ARDOUR::KeyEnforcementPolicy (kep & ~kepb));
+	} else {
+		midi_track()->set_key_enforcement_policy (ARDOUR::KeyEnforcementPolicy (kep | kepb));
+	}
+}
+
+void
+MidiViewBackground::connect_property_changes ()
+{
+	midi_track()->PropertyChanged.connect (track_property_connection, invalidator (*this), [this](PBD::PropertyChange const & change) { property_change (change); }, gui_context());
+}
+
+void
+MidiViewBackground::disconnect_property_changes ()
+{
+	track_property_connection.disconnect ();
+}
+
+void
+MidiViewBackground::property_change (PBD::PropertyChange const & change)
+{
+	PBD::PropertyChange of_interest;
+
+	of_interest.add (ARDOUR::Properties::key_enforcement);
+	of_interest.add (ARDOUR::Properties::musical_mode);
+
+	if (change.contains (of_interest)) {
+		setup_note_lines ();
 	}
 }
